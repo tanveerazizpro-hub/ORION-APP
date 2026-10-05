@@ -18,12 +18,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -32,17 +37,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -167,11 +172,13 @@ fun OrionApp() {
     ) {
         Scaffold(
             containerColor = DeepSpace,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopBar(
                     currentTier = currentTier,
                     extendedMode = extendedMode,
                     onMenuClick = { scope.launch { drawerState.open() } },
+                    onNewChatClick = { greeting = "What should we focus on?" },
                     onTierSelected = { currentTier = it },
                     onExtendedToggle = { extendedMode = !extendedMode }
                 )
@@ -203,13 +210,14 @@ fun OrionApp() {
 }
 
 // ============================================
-// TOP BAR
+// TOP BAR (with status bar padding + 2-line hamburger + new chat)
 // ============================================
 @Composable
 fun TopBar(
     currentTier: Tier,
     extendedMode: Boolean,
     onMenuClick: () -> Unit,
+    onNewChatClick: () -> Unit,
     onTierSelected: (Tier) -> Unit,
     onExtendedToggle: () -> Unit
 ) {
@@ -218,13 +226,21 @@ fun TopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 2-line hamburger
         IconButton(onClick = onMenuClick) {
-            Icon(Icons.Default.Menu, "Menu", tint = TextPrimary)
+            Icon(
+                Icons.Default.DragHandle,
+                "Menu",
+                tint = TextPrimary,
+                modifier = Modifier.size(26.dp)
+            )
         }
 
+        // Tier dropdown
         Box {
             Row(
                 modifier = Modifier
@@ -247,7 +263,12 @@ fun TopBar(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
-                Icon(Icons.Default.KeyboardArrowDown, null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    null,
+                    tint = TextMuted,
+                    modifier = Modifier.size(16.dp)
+                )
             }
 
             DropdownMenu(
@@ -287,12 +308,20 @@ fun TopBar(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Icon(Icons.Default.OpenInFull, null, tint = TextMuted, modifier = Modifier.size(20.dp))
+                            Icon(
+                                Icons.Default.OpenInFull,
+                                null,
+                                tint = TextMuted,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Extended Mode", color = TextPrimary, fontSize = 14.sp)
                                 Text("Longer context window", color = TextMuted, fontSize = 12.sp)
                             }
-                            Switch(checked = extendedMode, onCheckedChange = { onExtendedToggle() })
+                            Switch(
+                                checked = extendedMode,
+                                onCheckedChange = { onExtendedToggle() }
+                            )
                         }
                     },
                     onClick = { onExtendedToggle() }
@@ -302,6 +331,17 @@ fun TopBar(
 
         Spacer(Modifier.weight(1f))
 
+        // New chat button (top-right corner, better icon)
+        IconButton(onClick = onNewChatClick) {
+            Icon(
+                Icons.Default.Edit,
+                "New chat",
+                tint = TextPrimary,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
+        // Avatar
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -315,11 +355,16 @@ fun TopBar(
 }
 
 // ============================================
-// SIDEBAR
+// SIDEBAR (no placeholder text, clean list)
 // ============================================
 @Composable
 fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -327,12 +372,18 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("O.R.I.O.N.", color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Light)
+            Text(
+                "O.R.I.O.N.",
+                color = TextPrimary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Light
+            )
             IconButton(onClick = onClose) {
                 Icon(Icons.Default.Close, null, tint = TextMuted)
             }
         }
 
+        // New chat button (improved icon)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -340,23 +391,25 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                 .clip(RoundedCornerShape(999.dp))
                 .background(SurfaceContainerHigh)
                 .clickable { onClose() }
-                .padding(20.dp, 12.dp),
+                .padding(20.dp, 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Icon(Icons.Default.Edit, null, tint = TextPrimary, modifier = Modifier.size(20.dp))
-            Text("New chat", color = TextPrimary, fontSize = 15.sp)
+            Icon(
+                Icons.Default.Edit,
+                null,
+                tint = OrionPurple,
+                modifier = Modifier.size(22.dp)
+            )
+            Text(
+                "New chat",
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            "RECENT",
-            color = TextMuted,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(20.dp, 12.dp, 20.dp, 8.dp)
-        )
+        Spacer(Modifier.height(20.dp))
 
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
             items(sessions) { session ->
@@ -378,7 +431,7 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp, 14.dp, 20.dp, 18.dp),
+                .padding(20.dp, 14.dp, 20.dp, 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -392,10 +445,20 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                 Text("T", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Tanveer Aziz", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    "Tanveer Aziz",
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
                 Text("PRO", color = TextMuted, fontSize = 12.sp)
             }
-            Icon(Icons.Default.Settings, null, tint = TextMuted, modifier = Modifier.size(22.dp))
+            Icon(
+                Icons.Default.Settings,
+                null,
+                tint = TextMuted,
+                modifier = Modifier.size(22.dp)
+            )
         }
     }
 }
@@ -436,7 +499,12 @@ fun EmptyState(greeting: String) {
                         )
                     )
             )
-            Icon(Icons.Default.Star, null, tint = StarRed, modifier = Modifier.size(72.dp))
+            Icon(
+                Icons.Default.Star,
+                null,
+                tint = StarRed,
+                modifier = Modifier.size(72.dp)
+            )
         }
 
         Spacer(Modifier.height(32.dp))
@@ -452,13 +520,14 @@ fun EmptyState(greeting: String) {
 }
 
 // ============================================
-// INPUT BAR
+// INPUT BAR (no placeholder text, cleaner)
 // ============================================
 @Composable
 fun InputBar(text: String, onTextChange: (String) -> Unit, onSend: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(16.dp),
         horizontalArrangement = Arrangement.Center
     ) {
@@ -478,7 +547,7 @@ fun InputBar(text: String, onTextChange: (String) -> Unit, onSend: () -> Unit) {
             TextField(
                 value = text,
                 onValueChange = onTextChange,
-                placeholder = { Text("Ask O.R.I.O.N...", color = TextMuted) },
+                placeholder = null,
                 modifier = Modifier.weight(1f),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
