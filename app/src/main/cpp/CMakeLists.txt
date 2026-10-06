@@ -8,20 +8,15 @@ set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 
-# Cross-compiling from x86 — never use native detection
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
-
-# Only build for this specific device, no runtime variants
 set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
 
-# Link-time optimization
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 
-# Target the Cortex-A76 pipeline directly.
-# -mcpu=cortex-a76 implies ARMv8.2-A + DOTPROD + FP16 and tunes scheduling.
-# -mcpu implies -mtune=cortex-a76, unlike -march which only enables features.
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mcpu=cortex-a76 -ffast-math")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mcpu=cortex-a76 -ffast-math")
+# -mcpu tunes instruction scheduling for Cortex-A76 specifically.
+# NO -ffast-math: it implies -ffinite-math-only, which breaks GGML.
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mcpu=cortex-a76")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mcpu=cortex-a76")
 
 add_subdirectory(llama.cpp)
 
