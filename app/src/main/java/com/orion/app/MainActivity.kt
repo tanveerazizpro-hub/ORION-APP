@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -42,9 +45,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,20 +53,16 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,7 +80,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 
 // ============================================
 // COLORS
@@ -190,8 +186,12 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrionApp() {
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
+    var isSidebarOpen by remember { mutableStateOf(false) }
+    val sidebarWidth by animateDpAsState(
+        targetValue = if (isSidebarOpen) 300.dp else 0.dp,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "sidebarWidth"
+    )
 
     var currentTier by remember { mutableStateOf(Tier.PRIME) }
     var extendedMode by remember { mutableStateOf(false) }
@@ -207,55 +207,51 @@ fun OrionApp() {
         ChatSession("Definition of a Queen")
     )
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        // STRONG SCRIM — hides content behind completely
-        scrimColor = Color.Black.copy(alpha = 0.75f),
-        drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = Surface1,
-                drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
-                // Force drawer to be opaque and cover full height
-                modifier = Modifier.fillMaxSize()
-            ) {
-                SidebarContent(sessions, onClose = { scope.launch { drawerState.close() } })
+    Row(modifier = Modifier.fillMaxSize().background(DeepSpace)) {
+        // Adaptive Sidebar (Pushes content, does not overlay)
+        Box(modifier = Modifier.width(sidebarWidth).fillMaxHeight()) {
+            if (sidebarWidth > 0.dp) {
+                SidebarContent(sessions, onClose = { isSidebarOpen = false })
             }
         }
-    ) {
-        Scaffold(
-            containerColor = DeepSpace,
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            topBar = {
-                TopBar(
-                    currentTier = currentTier,
-                    extendedMode = extendedMode,
-                    onMenuClick = { scope.launch { drawerState.open() } },
-                    onNewChatClick = { greeting = "What should we focus on?" },
-                    onTierSelected = { currentTier = it },
-                    onExtendedToggle = { extendedMode = !extendedMode }
-                )
-            },
-            bottomBar = {
-                InputBar(
-                    text = inputText,
-                    onTextChange = { inputText = it },
-                    onSend = {
-                        if (inputText.isNotBlank()) {
-                            val label = if (extendedMode) "${currentTier.display} Extended" else "Orion ${currentTier.display}"
-                            greeting = "[$label] Mock response"
-                            inputText = ""
+
+        // Main Content Area
+        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            Scaffold(
+                containerColor = DeepSpace,
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                topBar = {
+                    TopBar(
+                        currentTier = currentTier,
+                        extendedMode = extendedMode,
+                        onMenuClick = { isSidebarOpen = !isSidebarOpen },
+                        onNewChatClick = { greeting = "What should we focus on?" },
+                        onTierSelected = { currentTier = it },
+                        onExtendedToggle = { extendedMode = !extendedMode }
+                    )
+                },
+                bottomBar = {
+                    InputBar(
+                        text = inputText,
+                        onTextChange = { inputText = it },
+                        onSend = {
+                            if (inputText.isNotBlank()) {
+                                val label = if (extendedMode) "${currentTier.display} Extended" else "Orion ${currentTier.display}"
+                                greeting = "[$label] Mock response"
+                                inputText = ""
+                            }
                         }
-                    }
-                )
-            }
-        ) { padding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .background(DeepSpace)
-            ) {
-                EmptyState(greeting)
+                    )
+                }
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .background(DeepSpace)
+                ) {
+                    EmptyState(greeting)
+                }
             }
         }
     }
@@ -282,27 +278,34 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Hamburger (2 lines)
+        // Gemini-style toggle icon (rounded square + vertical line)
         IconButton(onClick = onMenuClick) {
             Canvas(modifier = Modifier.size(24.dp)) {
-                val strokeWidth = 2.dp.toPx()
-                val lineGap = 8.dp.toPx()
-                val centerY = size.height / 2f
-                val startX = 3.dp.toPx()
-                val endX = size.width - 3.dp.toPx()
+                val stroke = 2.dp.toPx()
+                val rectSize = 18.dp.toPx()
+                val left = (size.width - rectSize) / 2f
+                val top = (size.height - rectSize) / 2f
+                val corner = 5.dp.toPx()
+
+                val path = Path().apply {
+                    moveTo(left + corner, top)
+                    lineTo(left + rectSize - corner, top)
+                    quadraticBezierTo(left + rectSize, top, left + rectSize, top + corner)
+                    lineTo(left + rectSize, top + rectSize - corner)
+                    quadraticBezierTo(left + rectSize, top + rectSize, left + rectSize - corner, top + rectSize)
+                    lineTo(left + corner, top + rectSize)
+                    quadraticBezierTo(left, top + rectSize, left, top + rectSize - corner)
+                    lineTo(left, top + corner)
+                    quadraticBezierTo(left, top, left + corner, top)
+                    close()
+                }
+                drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
 
                 drawLine(
                     color = TextPrimary,
-                    start = Offset(startX, centerY - lineGap / 2),
-                    end = Offset(endX, centerY - lineGap / 2),
-                    strokeWidth = strokeWidth,
-                    cap = StrokeCap.Round
-                )
-                drawLine(
-                    color = TextPrimary,
-                    start = Offset(startX, centerY + lineGap / 2),
-                    end = Offset(endX, centerY + lineGap / 2),
-                    strokeWidth = strokeWidth,
+                    start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
+                    end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
+                    strokeWidth = stroke,
                     cap = StrokeCap.Round
                 )
             }
@@ -401,7 +404,7 @@ fun TopBar(
 
         IconButton(onClick = onNewChatClick) {
             Icon(
-                Icons.Default.Edit,
+                Icons.Outlined.Edit,
                 "New chat",
                 tint = TextPrimary,
                 modifier = Modifier.size(22.dp)
@@ -436,8 +439,7 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp, 20.dp, 20.dp, 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 "O.R.I.O.N.",
@@ -445,38 +447,6 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Light
             )
-            // Gemini-style collapse icon
-            IconButton(onClick = onClose) {
-                Canvas(modifier = Modifier.size(24.dp)) {
-                    val stroke = 2.dp.toPx()
-                    val rectSize = 20.dp.toPx()
-                    val left = (size.width - rectSize) / 2f
-                    val top = (size.height - rectSize) / 2f
-                    val corner = 5.dp.toPx()
-
-                    val path = Path().apply {
-                        moveTo(left + corner, top)
-                        lineTo(left + rectSize - corner, top)
-                        quadraticBezierTo(left + rectSize, top, left + rectSize, top + corner)
-                        lineTo(left + rectSize, top + rectSize - corner)
-                        quadraticBezierTo(left + rectSize, top + rectSize, left + rectSize - corner, top + rectSize)
-                        lineTo(left + corner, top + rectSize)
-                        quadraticBezierTo(left, top + rectSize, left, top + rectSize - corner)
-                        lineTo(left, top + corner)
-                        quadraticBezierTo(left, top, left + corner, top)
-                        close()
-                    }
-                    drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
-
-                    drawLine(
-                        color = TextPrimary,
-                        start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
-                        end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
-                        strokeWidth = stroke,
-                        cap = StrokeCap.Round
-                    )
-                }
-            }
         }
 
         Row(
