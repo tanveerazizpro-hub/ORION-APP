@@ -201,14 +201,8 @@ fun OrionApp() {
     var inputText by remember { mutableStateOf("") }
     var greeting by remember { mutableStateOf("What should we focus on?") }
 
-    val sessions = listOf(
-        ChatSession("Building Guardian App"),
-        ChatSession("O.R.I.O.N. UI Mockup"),
-        ChatSession("Android Local LLM"),
-        ChatSession("Physics — Forces"),
-        ChatSession("Chemistry — Matter"),
-        ChatSession("Definition of a Queen")
-    )
+    // Placeholder chats removed — empty list until AI generates real chats
+    val sessions = emptyList<ChatSession>()
 
     Row(modifier = Modifier.fillMaxSize().background(DeepSpace)) {
         // Adaptive Sidebar (Pushes content, does not overlay)
@@ -276,7 +270,6 @@ fun TopBar(
 ) {
     var dropdownOpen by remember { mutableStateOf(false) }
 
-    // Smooth animation states for the hamburger menu
     val hamburgerAlpha by animateFloatAsState(
         targetValue = if (isSidebarOpen) 0f else 1f,
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
@@ -300,7 +293,6 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 2-line hamburger menu to OPEN sidebar (Animated)
         Box(
             modifier = Modifier
                 .width(hamburgerWidth)
@@ -338,7 +330,6 @@ fun TopBar(
             }
         }
 
-        // Tier pill
         Box {
             Row(
                 modifier = Modifier
@@ -462,7 +453,6 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Sidebar Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -478,7 +468,6 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             
             Spacer(Modifier.weight(1f))
 
-            // Gemini-style collapse icon to CLOSE sidebar (Top Right)
             IconButton(onClick = onClose) {
                 Canvas(modifier = Modifier.size(24.dp)) {
                     val stroke = 2.dp.toPx()
