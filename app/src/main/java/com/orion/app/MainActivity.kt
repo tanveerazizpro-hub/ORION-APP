@@ -61,6 +61,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +80,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -189,6 +191,14 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrionApp() {
+    val context = LocalContext.current
+
+    // Init ModelManager once on app start
+    LaunchedEffect(Unit) {
+        ModelManager.init(context)
+    }
+
+    var showSettings by remember { mutableStateOf(false) }
     var isSidebarOpen by remember { mutableStateOf(false) }
     val sidebarWidth by animateDpAsState(
         targetValue = if (isSidebarOpen) 300.dp else 0.dp,
@@ -201,18 +211,28 @@ fun OrionApp() {
     var inputText by remember { mutableStateOf("") }
     var greeting by remember { mutableStateOf("What should we focus on?") }
 
-    // Placeholder chats removed — empty list until AI generates real chats
     val sessions = emptyList<ChatSession>()
 
+    // Full-screen Settings overlay
+    if (showSettings) {
+        SettingsScreen(onClose = { showSettings = false })
+        return
+    }
+
     Row(modifier = Modifier.fillMaxSize().background(DeepSpace)) {
-        // Adaptive Sidebar (Pushes content, does not overlay)
         Box(modifier = Modifier.width(sidebarWidth).fillMaxHeight()) {
             if (sidebarWidth > 0.dp) {
-                SidebarContent(sessions, onClose = { isSidebarOpen = false })
+                SidebarContent(
+                    sessions = sessions,
+                    onClose = { isSidebarOpen = false },
+                    onOpenSettings = {
+                        isSidebarOpen = false
+                        showSettings = true
+                    }
+                )
             }
         }
 
-        // Main Content Area
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             Scaffold(
                 containerColor = DeepSpace,
@@ -445,7 +465,11 @@ fun TopBar(
 // SIDEBAR
 // ============================================
 @Composable
-fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
+fun SidebarContent(
+    sessions: List<ChatSession>,
+    onClose: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -520,6 +544,32 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             )
             Text(
                 "New chat",
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .clickable { onOpenSettings() }
+                .padding(20.dp, 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Icon(
+                Icons.Default.Settings,
+                null,
+                tint = TextPrimary,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                "Settings",
                 color = TextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium
