@@ -65,6 +65,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,6 +86,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ============================================
 // COLORS
@@ -192,6 +196,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun OrionApp() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         ModelManager.init(context)
@@ -208,7 +213,33 @@ fun OrionApp() {
     var currentTier by remember { mutableStateOf(Tier.PRIME) }
     var extendedMode by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
-    var greeting by remember { mutableStateOf("What should we focus on?") }
+
+    // AI state
+    var statusMessage by remember { mutableStateOf("What should we focus on?") }
+    var userMessage by remember { mutableStateOf("") }
+    var aiResponse by remember { mutableStateOf("") }
+    var isModelLoading by remember { mutableStateOf(false) }
+    var isGenerating by remember { mutableStateOf(false) }
+
+    // Load the assigned model whenever the tier changes
+    LaunchedEffect(currentTier, ModelManager.tierAssignments.value) {
+        val assigned = ModelManager.tierAssignments.value[currentTier]
+        if (assigned == null) {
+            isModelLoading = false
+            return@LaunchedEffect
+        }
+        val path = ModelManager.getAssignedModelPath(context, currentTier)
+        if (path == null) {
+            statusMessage = "Assigned model '${assigned}' not found"
+            isModelLoading = false
+            return@LaunchedEffect
+        }
+        isModelLoading = true
+        statusMessage = "Loading ${currentTier.display}..."
+        val ok = LlamaEngine.loadModelAsync(path)
+        isModelLoading = false
+        statusMessage = if (ok) "What should we focus on?" else "Failed to load model"
+    }
 
     val sessions = emptyList<ChatSession>()
 
@@ -241,8 +272,18 @@ fun OrionApp() {
                         extendedMode = extendedMode,
                         isSidebarOpen = isSidebarOpen,
                         onMenuClick = { isSidebarOpen = true },
-                        onNewChatClick = { greeting = "What should we focus on?" },
-                        onTierSelected = { currentTier = it },
+                        onNewChatClick = {
+                            aiResponse = ""
+                            userMessage = ""
+                            statusMessage = "What should we focus on?"
+                        },
+                        onTierSelected = { newTier ->
+                            if (newTier != currentTier) {
+                                currentTier = newTier
+                                aiResponse = ""
+                                userMessage = ""
+                            }
+                        },
                         onExtendedToggle = { extendedMode = !extendedMode }
                     )
                 },
@@ -251,10 +292,37 @@ fun OrionApp() {
                         text = inputText,
                         onTextChange = { inputText = it },
                         onSend = {
-                            if (inputText.isNotBlank()) {
-                                val label = if (extendedMode) "${currentTier.display} Extended" else "Orion ${currentTier.display}"
-                                greeting = "[$label] Mock response"
-                                inputText = ""
+                            val prompt = inputText.trim()
+                            if (prompt.isEmpty() || isGenerating || isModelLoading) return@InputBar
+
+                            val assigned = ModelManager.tierAssignments.value[currentTier]
+                            if (assigned == null) {
+                                statusMessage = "No model assigned to ${currentTier.display}. Open Settings → assign a model."
+                                return@InputBar
+                            }
+
+                            inputText = ""
+                            userMessage = prompt
+                            aiResponse = ""
+                            isGenerating = true
+                            statusMessage = "Thinking..."
+
+                            val maxTokens = if (extendedMode) 4096 else 2048
+                            scope.launch {
+                                try {
+                                    val result = LlamaEngine.generateAsync(
+                                        userMessage = prompt,
+                                        modelName = assigned,
+                                        maxTokens = maxTokens,
+                                        temp = 0.8f
+                                    )
+                                    aiResponse = result.trim().ifEmpty { "(empty response)" }
+                                } catch (e: Exception) {
+                                    aiResponse = "Error: ${e.message ?: "unknown"}"
+                                } finally {
+                                    isGenerating = false
+                                    statusMessage = ""
+                                }
                             }
                         }
                     )
@@ -266,7 +334,12 @@ fun OrionApp() {
                         .padding(padding)
                         .background(DeepSpace)
                 ) {
-                    EmptyState(greeting)
+                    ChatArea(
+                        userMessage = userMessage,
+                        aiResponse = aiResponse,
+                        isGenerating = isGenerating || isModelLoading,
+                        statusMessage = statusMessage
+                    )
                 }
             }
         }
@@ -592,7 +665,6 @@ fun SidebarContent(
                 )
                 Text("PRO", color = TextMuted, fontSize = 12.sp)
             }
-            // THIS IS THE GEAR ICON AT THE BOTTOM, NOW WIRED UP
             IconButton(onClick = onOpenSettings) {
                 Icon(
                     Icons.Default.Settings,
@@ -606,10 +678,15 @@ fun SidebarContent(
 }
 
 // ============================================
-// EMPTY STATE
+// CHAT AREA
 // ============================================
 @Composable
-fun EmptyState(greeting: String) {
+fun ChatArea(
+    userMessage: String,
+    aiResponse: String,
+    isGenerating: Boolean,
+    statusMessage: String
+) {
     val transition = rememberInfiniteTransition()
     val scale by transition.animateFloat(
         initialValue = 0.9f,
@@ -658,13 +735,35 @@ fun EmptyState(greeting: String) {
 
         Spacer(Modifier.height(28.dp))
 
-        Text(
-            greeting,
-            color = TextPrimary,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Light,
-            modifier = Modifier.padding(horizontal = 32.dp)
-        )
+        when {
+            isGenerating -> {
+                Text(
+                    statusMessage.ifEmpty { "Thinking..." },
+                    color = TextMuted,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Light,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
+            aiResponse.isNotEmpty() -> {
+                Text(
+                    aiResponse,
+                    color = TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
+            else -> {
+                Text(
+                    statusMessage.ifEmpty { "What should we focus on?" },
+                    color = TextPrimary,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Light,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
+        }
     }
 }
 
