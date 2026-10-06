@@ -1,6 +1,10 @@
 #include <jni.h>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <algorithm>
+#include <sched.h>
+#include <unistd.h>
 #include <android/log.h>
 #include "llama.h"
 
@@ -11,10 +15,57 @@
 static llama_model*   g_model = nullptr;
 static llama_context* g_ctx   = nullptr;
 
+// Pin current thread + all future children to the fastest CPU cores.
+// Reads /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq to find them,
+// so it works regardless of the core numbering layout on different devices.
+static void pinToBigCores() {
+    std::vector<std::pair<long, int>> cores;
+    for (int i = 0; i < 8; i++) {
+        std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(i)
+                         + "/cpufreq/cpuinfo_max_freq";
+        std::ifstream f(path);
+        if (!f.is_open()) continue;
+        long freq = 0;
+        f >> freq;
+        if (freq > 0) cores.push_back({freq, i});
+    }
+    if (cores.empty()) {
+        LOGI("pinToBigCores: no cpufreq info, skipping");
+        return;
+    }
+    std::sort(cores.begin(), cores.end(),
+              [](auto& a, auto& b) { return a.first > b.first; });
+    long topFreq = cores[0].first;
+
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    int pinnedCount = 0;
+    for (auto& [freq, id] : cores) {
+        if (freq == topFreq) {
+            CPU_SET(id, &set);
+            pinnedCount++;
+        }
+    }
+    int rc = sched_setaffinity(0, sizeof(set), &set);
+    LOGI("pinToBigCores: pinned to %d cores at %ld kHz, rc=%d",
+         pinnedCount, topFreq, rc);
+}
+
+// Restore affinity to all cores (for JNI thread hygiene)
+static void unpinFromBigCores() {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    for (long i = 0; i < n; i++) CPU_SET((int)i, &set);
+    sched_setaffinity(0, sizeof(set), &set);
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath) {
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
     LOGI("Loading model: %s", path);
+
+    pinToBigCores();
 
     llama_backend_init();
 
@@ -26,12 +77,13 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
 
     if (!g_model) {
         LOGE("Failed to load model");
+        unpinFromBigCores();
         return JNI_FALSE;
     }
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx           = 4096;
-    ctx_params.n_threads       = 4;     // A76 cluster only
+    ctx_params.n_threads       = 4;     // A76 cluster (pinned above)
     ctx_params.n_threads_batch = 4;
 
     g_ctx = llama_init_from_model(g_model, ctx_params);
@@ -39,10 +91,12 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
         LOGE("Failed to create context");
         llama_model_free(g_model);
         g_model = nullptr;
+        unpinFromBigCores();
         return JNI_FALSE;
     }
 
     LOGI("Model loaded OK");
+    unpinFromBigCores();
     return JNI_TRUE;
 }
 
@@ -53,6 +107,8 @@ Java_com_orion_app_LlamaEngine_generate(JNIEnv* env, jobject, jstring prompt,
         LOGE("Model not loaded");
         return env->NewStringUTF("");
     }
+
+    pinToBigCores();
 
     const char* p = env->GetStringUTFChars(prompt, nullptr);
     std::string prompt_text(p);
@@ -71,6 +127,7 @@ Java_com_orion_app_LlamaEngine_generate(JNIEnv* env, jobject, jstring prompt,
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
     if (llama_decode(g_ctx, batch)) {
         LOGE("Failed to decode prompt");
+        unpinFromBigCores();
         return env->NewStringUTF("");
     }
 
@@ -95,6 +152,7 @@ Java_com_orion_app_LlamaEngine_generate(JNIEnv* env, jobject, jstring prompt,
     }
 
     llama_sampler_free(smpl);
+    unpinFromBigCores();
     return env->NewStringUTF(result.c_str());
 }
 
