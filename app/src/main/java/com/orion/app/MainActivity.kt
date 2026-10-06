@@ -78,7 +78,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -283,6 +282,11 @@ fun TopBar(
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
         label = "hamburgerAlpha"
     )
+    val hamburgerWidth by animateDpAsState(
+        targetValue = if (isSidebarOpen) 0.dp else 48.dp,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "hamburgerWidth"
+    )
     val hamburgerScale by animateFloatAsState(
         targetValue = if (isSidebarOpen) 0.8f else 1f,
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
@@ -299,7 +303,7 @@ fun TopBar(
         // 2-line hamburger menu to OPEN sidebar (Animated)
         Box(
             modifier = Modifier
-                .width(48.dp)
+                .width(hamburgerWidth)
                 .clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
@@ -588,7 +592,7 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
 }
 
 // ============================================
-// EMPTY STATE (Pulsing Animation)
+// EMPTY STATE
 // ============================================
 @Composable
 fun EmptyState(greeting: String) {
@@ -618,10 +622,7 @@ fun EmptyState(greeting: String) {
         Box(
             modifier = Modifier
                 .size(160.dp)
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                },
+                .scale(scale),
             contentAlignment = Alignment.Center
         ) {
             Box(
