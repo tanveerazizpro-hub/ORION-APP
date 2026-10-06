@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -66,7 +67,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -273,6 +276,23 @@ fun TopBar(
 ) {
     var dropdownOpen by remember { mutableStateOf(false) }
 
+    // Smooth animation states for the hamburger menu
+    val hamburgerAlpha by animateFloatAsState(
+        targetValue = if (isSidebarOpen) 0f else 1f,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "hamburgerAlpha"
+    )
+    val hamburgerWidth by animateDpAsState(
+        targetValue = if (isSidebarOpen) 0.dp else 48.dp,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "hamburgerWidth"
+    )
+    val hamburgerScale by animateFloatAsState(
+        targetValue = if (isSidebarOpen) 0.8f else 1f,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "hamburgerScale"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -280,9 +300,19 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 2-line hamburger menu to OPEN sidebar (hidden when sidebar is open)
-        if (!isSidebarOpen) {
-            IconButton(onClick = onMenuClick) {
+        // 2-line hamburger menu to OPEN sidebar (Animated)
+        Box(
+            modifier = Modifier
+                .width(hamburgerWidth)
+                .clipToBounds(),
+            contentAlignment = Alignment.Center
+        ) {
+            IconButton(
+                onClick = onMenuClick,
+                modifier = Modifier
+                    .alpha(hamburgerAlpha)
+                    .scale(hamburgerScale)
+            ) {
                 Canvas(modifier = Modifier.size(24.dp)) {
                     val strokeWidth = 2.dp.toPx()
                     val lineGap = 8.dp.toPx()
