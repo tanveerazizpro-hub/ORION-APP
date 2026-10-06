@@ -174,76 +174,6 @@ fun SparkleStar(modifier: Modifier = Modifier, size: Int = 72) {
 }
 
 // ============================================
-// ORION NEBULA BACKGROUND
-// ============================================
-@Composable
-fun NebulaBackground(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val width = size.width
-        val height = size.height
-
-        // The Nebula Glow (Soft pink/purple cosmic mist)
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    OrionPink.copy(alpha = 0.15f),
-                    OrionPurple.copy(alpha = 0.08f),
-                    Color.Transparent
-                ),
-                center = Offset(width * 0.7f, height * 0.3f),
-                radius = width * 0.8f
-            ),
-            radius = width * 0.8f,
-            center = Offset(width * 0.7f, height * 0.3f)
-        )
-
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    OrionOrange.copy(alpha = 0.1f),
-                    Color.Transparent
-                ),
-                center = Offset(width * 0.2f, height * 0.6f),
-                radius = width * 0.6f
-            ),
-            radius = width * 0.6f,
-            center = Offset(width * 0.2f, height * 0.6f)
-        )
-
-        // Orion's Belt (Three bright stars in a diagonal line)
-        val beltY = height * 0.45f
-        val beltX = width * 0.5f
-        val starRadius = 2.dp.toPx()
-        
-        // Star 1 (Top Left)
-        drawCircle(
-            color = Color.White.copy(alpha = 0.8f), 
-            radius = starRadius * 1.5f, 
-            center = Offset(beltX - 30.dp.toPx(), beltY - 10.dp.toPx())
-        )
-        // Star 2 (Middle)
-        drawCircle(
-            color = Color.White.copy(alpha = 0.9f), 
-            radius = starRadius * 1.2f, 
-            center = Offset(beltX, beltY)
-        )
-        // Star 3 (Bottom Right)
-        drawCircle(
-            color = Color.White.copy(alpha = 0.7f), 
-            radius = starRadius * 1.8f, 
-            center = Offset(beltX + 30.dp.toPx(), beltY + 10.dp.toPx())
-        )
-
-        // A few scattered distant stars
-        drawCircle(color = Color.White.copy(alpha = 0.4f), radius = 1.dp.toPx(), center = Offset(width * 0.15f, height * 0.2f))
-        drawCircle(color = Color.White.copy(alpha = 0.3f), radius = 1.dp.toPx(), center = Offset(width * 0.85f, height * 0.15f))
-        drawCircle(color = Color.White.copy(alpha = 0.5f), radius = 1.dp.toPx(), center = Offset(width * 0.4f, height * 0.8f))
-        drawCircle(color = Color.White.copy(alpha = 0.2f), radius = 1.dp.toPx(), center = Offset(width * 0.9f, height * 0.7f))
-        drawCircle(color = Color.White.copy(alpha = 0.6f), radius = 1.dp.toPx(), center = Offset(width * 0.1f, height * 0.9f))
-    }
-}
-
-// ============================================
 // MAIN
 // ============================================
 class MainActivity : ComponentActivity() {
@@ -271,6 +201,7 @@ fun OrionApp() {
     var inputText by remember { mutableStateOf("") }
     var greeting by remember { mutableStateOf("What should we focus on?") }
 
+    // Placeholder chats removed — empty list until AI generates real chats
     val sessions = emptyList<ChatSession>()
 
     Row(modifier = Modifier.fillMaxSize().background(DeepSpace)) {
@@ -284,7 +215,7 @@ fun OrionApp() {
         // Main Content Area
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             Scaffold(
-                containerColor = Color.Transparent, // Changed to transparent so Nebula shows
+                containerColor = DeepSpace,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 topBar = {
                     TopBar(
@@ -317,8 +248,6 @@ fun OrionApp() {
                         .padding(padding)
                         .background(DeepSpace)
                 ) {
-                    // NEBULA BACKGROUND ADDED HERE
-                    NebulaBackground()
                     EmptyState(greeting)
                 }
             }
