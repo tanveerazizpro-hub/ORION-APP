@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,13 +23,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +55,7 @@ fun SettingsScreen(onClose: () -> Unit) {
     val statusMessage by ModelImporter.statusMessage
     val importingFile by ModelImporter.importingFileName
     val models = ModelManager.availableModels
+    val assignments = ModelManager.tierAssignments.value
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -86,13 +93,39 @@ fun SettingsScreen(onClose: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // ===== TIER ASSIGNMENTS =====
+            item {
+                Text(
+                    "TIER ASSIGNMENTS",
+                    color = TextMuted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                )
+            }
+
+            items(Tier.entries.toList(), key = { it.name }) { tier ->
+                TierAssignmentRow(
+                    tier = tier,
+                    assignedModel = assignments[tier],
+                    availableModels = models,
+                    onAssign = { modelName ->
+                        ModelManager.assignModel(tier, modelName)
+                    },
+                    onClear = {
+                        ModelManager.clearAssignment(tier)
+                    }
+                )
+            }
+
+            // ===== IMPORT MODEL =====
             item {
                 Text(
                     "IMPORT MODEL",
                     color = TextMuted,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
                 )
             }
 
@@ -164,13 +197,14 @@ fun SettingsScreen(onClose: () -> Unit) {
                 }
             }
 
+            // ===== INSTALLED MODELS =====
             item {
                 Text(
                     "INSTALLED MODELS (${models.size})",
                     color = TextMuted,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
                 )
             }
 
@@ -209,6 +243,12 @@ fun SettingsScreen(onClose: () -> Unit) {
                             )
                         }
                         IconButton(onClick = {
+                            // Unassign from any tier that was using it
+                            Tier.entries.forEach { t ->
+                                if (ModelManager.tierAssignments.value[t] == modelName) {
+                                    ModelManager.clearAssignment(t)
+                                }
+                            }
                             file.delete()
                             ModelManager.refreshAvailableModels(context)
                         }) {
@@ -224,6 +264,88 @@ fun SettingsScreen(onClose: () -> Unit) {
             }
 
             item { Spacer(Modifier.height(32.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun TierAssignmentRow(
+    tier: Tier,
+    assignedModel: String?,
+    availableModels: List<String>,
+    onAssign: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(SurfaceContainer)
+                .clickable { menuOpen = true }
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                tier.icon,
+                null,
+                tint = if (assignedModel != null) OrionPurple else TextMuted,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    tier.display,
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    assignedModel ?: "Not assigned — tap to choose",
+                    color = TextMuted,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            modifier = Modifier.background(SurfaceContainerHigh)
+        ) {
+            if (availableModels.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("No models imported", color = TextMuted, fontSize = 13.sp) },
+                    onClick = { menuOpen = false }
+                )
+            } else {
+                availableModels.forEach { modelName ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                modelName,
+                                color = if (modelName == assignedModel) OrionPurple else TextPrimary,
+                                fontSize = 13.sp
+                            )
+                        },
+                        onClick = {
+                            onAssign(modelName)
+                            menuOpen = false
+                        }
+                    )
+                }
+            }
+            if (assignedModel != null) {
+                DropdownMenuItem(
+                    text = { Text("Remove assignment", color = OrionPink, fontSize = 13.sp) },
+                    onClick = {
+                        onClear()
+                        menuOpen = false
+                    }
+                )
+            }
         }
     }
 }
