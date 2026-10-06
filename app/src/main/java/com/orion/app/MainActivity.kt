@@ -224,7 +224,7 @@ fun OrionApp() {
                     TopBar(
                         currentTier = currentTier,
                         extendedMode = extendedMode,
-                        onMenuClick = { isSidebarOpen = !isSidebarOpen },
+                        onMenuClick = { isSidebarOpen = true },
                         onNewChatClick = { greeting = "What should we focus on?" },
                         onTierSelected = { currentTier = it },
                         onExtendedToggle = { extendedMode = !extendedMode }
@@ -258,7 +258,7 @@ fun OrionApp() {
 }
 
 // ============================================
-// TOP BAR
+// TOP BAR (Main)
 // ============================================
 @Composable
 fun TopBar(
@@ -278,34 +278,27 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Gemini-style toggle icon (rounded square + vertical line)
+        // 2-line hamburger menu to OPEN sidebar
         IconButton(onClick = onMenuClick) {
             Canvas(modifier = Modifier.size(24.dp)) {
-                val stroke = 2.dp.toPx()
-                val rectSize = 18.dp.toPx()
-                val left = (size.width - rectSize) / 2f
-                val top = (size.height - rectSize) / 2f
-                val corner = 5.dp.toPx()
-
-                val path = Path().apply {
-                    moveTo(left + corner, top)
-                    lineTo(left + rectSize - corner, top)
-                    quadraticBezierTo(left + rectSize, top, left + rectSize, top + corner)
-                    lineTo(left + rectSize, top + rectSize - corner)
-                    quadraticBezierTo(left + rectSize, top + rectSize, left + rectSize - corner, top + rectSize)
-                    lineTo(left + corner, top + rectSize)
-                    quadraticBezierTo(left, top + rectSize, left, top + rectSize - corner)
-                    lineTo(left, top + corner)
-                    quadraticBezierTo(left, top, left + corner, top)
-                    close()
-                }
-                drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
+                val strokeWidth = 2.dp.toPx()
+                val lineGap = 8.dp.toPx()
+                val centerY = size.height / 2f
+                val startX = 3.dp.toPx()
+                val endX = size.width - 3.dp.toPx()
 
                 drawLine(
                     color = TextPrimary,
-                    start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
-                    end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
-                    strokeWidth = stroke,
+                    start = Offset(startX, centerY - lineGap / 2),
+                    end = Offset(endX, centerY - lineGap / 2),
+                    strokeWidth = strokeWidth,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = TextPrimary,
+                    start = Offset(startX, centerY + lineGap / 2),
+                    end = Offset(endX, centerY + lineGap / 2),
+                    strokeWidth = strokeWidth,
                     cap = StrokeCap.Round
                 )
             }
@@ -435,6 +428,7 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
+        // Sidebar Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -447,6 +441,41 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Light
             )
+            
+            Spacer(Modifier.weight(1f))
+
+            // Gemini-style collapse icon to CLOSE sidebar (Top Right)
+            IconButton(onClick = onClose) {
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val stroke = 2.dp.toPx()
+                    val rectSize = 20.dp.toPx()
+                    val left = (size.width - rectSize) / 2f
+                    val top = (size.height - rectSize) / 2f
+                    val corner = 5.dp.toPx()
+
+                    val path = Path().apply {
+                        moveTo(left + corner, top)
+                        lineTo(left + rectSize - corner, top)
+                        quadraticBezierTo(left + rectSize, top, left + rectSize, top + corner)
+                        lineTo(left + rectSize, top + rectSize - corner)
+                        quadraticBezierTo(left + rectSize, top + rectSize, left + rectSize - corner, top + rectSize)
+                        lineTo(left + corner, top + rectSize)
+                        quadraticBezierTo(left, top + rectSize, left, top + rectSize - corner)
+                        lineTo(left, top + corner)
+                        quadraticBezierTo(left, top, left + corner, top)
+                        close()
+                    }
+                    drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
+
+                    drawLine(
+                        color = TextPrimary,
+                        start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
+                        end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
         }
 
         Row(
