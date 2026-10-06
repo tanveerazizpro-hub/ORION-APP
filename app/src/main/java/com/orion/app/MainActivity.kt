@@ -224,6 +224,7 @@ fun OrionApp() {
                     TopBar(
                         currentTier = currentTier,
                         extendedMode = extendedMode,
+                        isSidebarOpen = isSidebarOpen,
                         onMenuClick = { isSidebarOpen = true },
                         onNewChatClick = { greeting = "What should we focus on?" },
                         onTierSelected = { currentTier = it },
@@ -264,6 +265,7 @@ fun OrionApp() {
 fun TopBar(
     currentTier: Tier,
     extendedMode: Boolean,
+    isSidebarOpen: Boolean,
     onMenuClick: () -> Unit,
     onNewChatClick: () -> Unit,
     onTierSelected: (Tier) -> Unit,
@@ -278,29 +280,31 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 2-line hamburger menu to OPEN sidebar
-        IconButton(onClick = onMenuClick) {
-            Canvas(modifier = Modifier.size(24.dp)) {
-                val strokeWidth = 2.dp.toPx()
-                val lineGap = 8.dp.toPx()
-                val centerY = size.height / 2f
-                val startX = 3.dp.toPx()
-                val endX = size.width - 3.dp.toPx()
+        // 2-line hamburger menu to OPEN sidebar (hidden when sidebar is open)
+        if (!isSidebarOpen) {
+            IconButton(onClick = onMenuClick) {
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val strokeWidth = 2.dp.toPx()
+                    val lineGap = 8.dp.toPx()
+                    val centerY = size.height / 2f
+                    val startX = 3.dp.toPx()
+                    val endX = size.width - 3.dp.toPx()
 
-                drawLine(
-                    color = TextPrimary,
-                    start = Offset(startX, centerY - lineGap / 2),
-                    end = Offset(endX, centerY - lineGap / 2),
-                    strokeWidth = strokeWidth,
-                    cap = StrokeCap.Round
-                )
-                drawLine(
-                    color = TextPrimary,
-                    start = Offset(startX, centerY + lineGap / 2),
-                    end = Offset(endX, centerY + lineGap / 2),
-                    strokeWidth = strokeWidth,
-                    cap = StrokeCap.Round
-                )
+                    drawLine(
+                        color = TextPrimary,
+                        start = Offset(startX, centerY - lineGap / 2),
+                        end = Offset(endX, centerY - lineGap / 2),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = TextPrimary,
+                        start = Offset(startX, centerY + lineGap / 2),
+                        end = Offset(endX, centerY + lineGap / 2),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round
+                    )
+                }
             }
         }
 
