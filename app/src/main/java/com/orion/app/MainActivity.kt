@@ -69,7 +69,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -78,6 +77,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -282,11 +282,6 @@ fun TopBar(
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
         label = "hamburgerAlpha"
     )
-    val hamburgerWidth by animateDpAsState(
-        targetValue = if (isSidebarOpen) 0.dp else 48.dp,
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "hamburgerWidth"
-    )
     val hamburgerScale by animateFloatAsState(
         targetValue = if (isSidebarOpen) 0.8f else 1f,
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
@@ -300,41 +295,31 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 2-line hamburger menu to OPEN sidebar (Animated)
-        Box(
-            modifier = Modifier
-                .width(hamburgerWidth)
-                .clipToBounds(),
-            contentAlignment = Alignment.Center
+        // 2-line hamburger menu to OPEN sidebar (Animated with graphicsLayer)
+        IconButton(
+            onClick = onMenuClick,
+            modifier = Modifier.graphicsLayer {
+                alpha = hamburgerAlpha
+                scaleX = hamburgerScale
+                scaleY = hamburgerScale
+            }
         ) {
-            IconButton(
-                onClick = onMenuClick,
-                modifier = Modifier
-                    .alpha(hamburgerAlpha)
-                    .scale(hamburgerScale)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.Start
             ) {
-                Canvas(modifier = Modifier.size(24.dp)) {
-                    val strokeWidth = 2.dp.toPx()
-                    val lineGap = 8.dp.toPx()
-                    val centerY = size.height / 2f
-                    val startX = 3.dp.toPx()
-                    val endX = size.width - 3.dp.toPx()
-
-                    drawLine(
-                        color = TextPrimary,
-                        start = Offset(startX, centerY - lineGap / 2),
-                        end = Offset(endX, centerY - lineGap / 2),
-                        strokeWidth = strokeWidth,
-                        cap = StrokeCap.Round
-                    )
-                    drawLine(
-                        color = TextPrimary,
-                        start = Offset(startX, centerY + lineGap / 2),
-                        end = Offset(endX, centerY + lineGap / 2),
-                        strokeWidth = strokeWidth,
-                        cap = StrokeCap.Round
-                    )
-                }
+                Box(
+                    modifier = Modifier
+                        .size(width = 22.dp, height = 2.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(TextPrimary)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(width = 22.dp, height = 2.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(TextPrimary)
+                )
             }
         }
 
