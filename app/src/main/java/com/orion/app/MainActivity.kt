@@ -33,8 +33,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -82,13 +84,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 // ============================================
 // COLORS
@@ -197,6 +199,8 @@ class MainActivity : ComponentActivity() {
 fun OrionApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(Unit) {
         ModelManager.init(context)
@@ -214,14 +218,12 @@ fun OrionApp() {
     var extendedMode by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
 
-    // AI state
     var statusMessage by remember { mutableStateOf("What should we focus on?") }
     var userMessage by remember { mutableStateOf("") }
     var aiResponse by remember { mutableStateOf("") }
     var isModelLoading by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
 
-    // Load the assigned model whenever the tier changes
     LaunchedEffect(currentTier, ModelManager.tierAssignments.value) {
         val assigned = ModelManager.tierAssignments.value[currentTier]
         if (assigned == null) {
@@ -301,6 +303,10 @@ fun OrionApp() {
                                 return@InputBar
                             }
 
+                            // Auto-close keyboard + clear focus
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+
                             inputText = ""
                             userMessage = prompt
                             aiResponse = ""
@@ -316,7 +322,7 @@ fun OrionApp() {
                                         maxTokens = maxTokens,
                                         temp = 0.8f
                                     )
-                                    aiResponse = result.trim().ifEmpty { "(empty response)" }
+                                    aiResponse = cleanMarkdown(result.trim()).ifEmpty { "(empty response)" }
                                 } catch (e: Exception) {
                                     aiResponse = "Error: ${e.message ?: "unknown"}"
                                 } finally {
@@ -344,6 +350,15 @@ fun OrionApp() {
             }
         }
     }
+}
+
+// Strip basic markdown tokens so the response reads clean
+fun cleanMarkdown(text: String): String {
+    return text
+        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")  // **bold** → bold
+        .replace(Regex("\\*(.+?)\\*"), "$1")         // *italic* → italic
+        .replace(Regex("^#+\\s*", RegexOption.MULTILINE), "") // # Headers
+        .replace(Regex("^\\s*-\\s+", RegexOption.MULTILINE), "• ") // - bullets
 }
 
 // ============================================
@@ -678,7 +693,7 @@ fun SidebarContent(
 }
 
 // ============================================
-// CHAT AREA
+// CHAT AREA (Star only on empty screen, scrollable response)
 // ============================================
 @Composable
 fun ChatArea(
@@ -687,82 +702,110 @@ fun ChatArea(
     isGenerating: Boolean,
     statusMessage: String
 ) {
-    val transition = rememberInfiniteTransition()
-    val scale by transition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            tween(2400, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse
-        )
-    )
-    val glowAlpha by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(
-            tween(2400, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse
-        )
-    )
+    val isEmpty = userMessage.isEmpty() && aiResponse.isEmpty() && !isGenerating
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(160.dp)
-                .scale(scale),
-            contentAlignment = Alignment.Center
+    if (isEmpty) {
+        // Welcome screen with star
+        val transition = rememberInfiniteTransition()
+        val scale by transition.animateFloat(
+            initialValue = 0.9f,
+            targetValue = 1.08f,
+            animationSpec = infiniteRepeatable(
+                tween(2400, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse
+            )
+        )
+        val glowAlpha by transition.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 0.6f,
+            animationSpec = infiniteRepeatable(
+                tween(2400, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse
+            )
+        )
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                StarRed.copy(alpha = glowAlpha),
-                                OrionPurple.copy(alpha = glowAlpha * 0.4f),
-                                Color.Transparent
+                    .size(160.dp)
+                    .scale(scale),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    StarRed.copy(alpha = glowAlpha),
+                                    OrionPurple.copy(alpha = glowAlpha * 0.4f),
+                                    Color.Transparent
+                                )
                             )
                         )
-                    )
+                )
+                SparkleStar(modifier = Modifier, size = 90)
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            Text(
+                statusMessage.ifEmpty { "What should we focus on?" },
+                color = TextPrimary,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Light,
+                modifier = Modifier.padding(horizontal = 32.dp)
             )
-            SparkleStar(modifier = Modifier, size = 90)
         }
+    } else {
+        // Conversation view — scrollable, no star
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
+            // User message (right-aligned bubble)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    userMessage,
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(SurfaceContainerHigh)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
 
-        Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(20.dp))
 
-        when {
-            isGenerating -> {
+            // AI response (left-aligned, plain text)
+            if (isGenerating && aiResponse.isEmpty()) {
                 Text(
                     statusMessage.ifEmpty { "Thinking..." },
                     color = TextMuted,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Light,
-                    modifier = Modifier.padding(horizontal = 32.dp)
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Light
                 )
-            }
-            aiResponse.isNotEmpty() -> {
+            } else {
                 Text(
                     aiResponse,
                     color = TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal,
-                    modifier = Modifier.padding(horizontal = 32.dp)
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp
                 )
             }
-            else -> {
-                Text(
-                    statusMessage.ifEmpty { "What should we focus on?" },
-                    color = TextPrimary,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Light,
-                    modifier = Modifier.padding(horizontal = 32.dp)
-                )
-            }
+
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
