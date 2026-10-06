@@ -10,6 +10,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,11 +25,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -37,8 +36,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
@@ -46,8 +45,7 @@ import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -75,8 +73,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -130,6 +131,64 @@ fun OrionTheme(content: @Composable () -> Unit) {
 }
 
 // ============================================
+// 4-POINT SPARKLE ICON (custom)
+// ============================================
+fun DrawScope.drawFourPointSparkle(
+    center: Offset,
+    size: Float,
+    brush: Brush
+) {
+    val path = Path().apply {
+        // Top point
+        moveTo(center.x, center.y - size)
+        // Right-inner
+        cubicTo(
+            center.x + size * 0.15f, center.y - size * 0.15f,
+            center.x + size * 0.15f, center.y - size * 0.15f,
+            center.x + size, center.y
+        )
+        // Bottom point
+        cubicTo(
+            center.x + size * 0.15f, center.y + size * 0.15f,
+            center.x + size * 0.15f, center.y + size * 0.15f,
+            center.x, center.y + size
+        )
+        // Left point
+        cubicTo(
+            center.x - size * 0.15f, center.y + size * 0.15f,
+            center.x - size * 0.15f, center.y + size * 0.15f,
+            center.x - size, center.y
+        )
+        // Back to top
+        cubicTo(
+            center.x - size * 0.15f, center.y - size * 0.15f,
+            center.x - size * 0.15f, center.y - size * 0.15f,
+            center.x, center.y - size
+        )
+        close()
+    }
+    drawPath(path, brush)
+}
+
+@Composable
+fun SparkleStar(
+    modifier: Modifier = Modifier,
+    size: Int = 72
+) {
+    Canvas(modifier = modifier.size(size.dp)) {
+        val center = Offset(this.size.width / 2f, this.size.height / 2f)
+        val radius = this.size.minDimension / 2f
+        drawFourPointSparkle(
+            center = center,
+            size = radius,
+            brush = Brush.linearGradient(
+                listOf(OrionPurple, OrionPink, OrionOrange)
+            )
+        )
+    }
+}
+
+// ============================================
 // MAIN
 // ============================================
 class MainActivity : ComponentActivity() {
@@ -165,7 +224,10 @@ fun OrionApp() {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet(drawerContainerColor = Surface1) {
+            ModalDrawerSheet(
+                drawerContainerColor = Surface1,
+                drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
+            ) {
                 SidebarContent(sessions, onClose = { scope.launch { drawerState.close() } })
             }
         }
@@ -210,7 +272,7 @@ fun OrionApp() {
 }
 
 // ============================================
-// TOP BAR (with status bar padding + 2-line hamburger + new chat)
+// TOP BAR
 // ============================================
 @Composable
 fun TopBar(
@@ -230,17 +292,33 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 2-line hamburger
+        // Hamburger
         IconButton(onClick = onMenuClick) {
-            Icon(
-                Icons.Default.DragHandle,
-                "Menu",
-                tint = TextPrimary,
-                modifier = Modifier.size(26.dp)
-            )
+            Canvas(modifier = Modifier.size(24.dp)) {
+                val strokeWidth = 2.dp.toPx()
+                val lineGap = 8.dp.toPx()
+                val centerY = size.height / 2f
+                val startX = 3.dp.toPx()
+                val endX = size.width - 3.dp.toPx()
+
+                drawLine(
+                    color = TextPrimary,
+                    start = Offset(startX, centerY - lineGap / 2),
+                    end = Offset(endX, centerY - lineGap / 2),
+                    strokeWidth = strokeWidth,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+                drawLine(
+                    color = TextPrimary,
+                    start = Offset(startX, centerY + lineGap / 2),
+                    end = Offset(endX, centerY + lineGap / 2),
+                    strokeWidth = strokeWidth,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            }
         }
 
-        // Tier dropdown
+        // Tier pill
         Box {
             Row(
                 modifier = Modifier
@@ -331,13 +409,13 @@ fun TopBar(
 
         Spacer(Modifier.weight(1f))
 
-        // New chat button (top-right corner, better icon)
+        // New chat (top-right)
         IconButton(onClick = onNewChatClick) {
             Icon(
                 Icons.Default.Edit,
                 "New chat",
                 tint = TextPrimary,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(22.dp)
             )
         }
 
@@ -355,7 +433,7 @@ fun TopBar(
 }
 
 // ============================================
-// SIDEBAR (no placeholder text, clean list)
+// SIDEBAR — Gemini-style collapse icon (no X)
 // ============================================
 @Composable
 fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
@@ -368,22 +446,53 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp, 24.dp, 20.dp, 14.dp),
+                .padding(20.dp, 20.dp, 20.dp, 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
                 "O.R.I.O.N.",
                 color = TextPrimary,
-                fontSize = 24.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Light
             )
+            // Collapse icon (like Gemini — rectangle with vertical line on left)
             IconButton(onClick = onClose) {
-                Icon(Icons.Default.Close, null, tint = TextMuted)
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val stroke = 2.dp.toPx()
+                    val rectSize = 20.dp.toPx()
+                    val left = (size.width - rectSize) / 2f
+                    val top = (size.height - rectSize) / 2f
+                    val corner = 5.dp.toPx()
+
+                    // Rounded rectangle outline
+                    val path = Path().apply {
+                        moveTo(left + corner, top)
+                        lineTo(left + rectSize - corner, top)
+                        quadraticBezierTo(left + rectSize, top, left + rectSize, top + corner)
+                        lineTo(left + rectSize, top + rectSize - corner)
+                        quadraticBezierTo(left + rectSize, top + rectSize, left + rectSize - corner, top + rectSize)
+                        lineTo(left + corner, top + rectSize)
+                        quadraticBezierTo(left, top + rectSize, left, top + rectSize - corner)
+                        lineTo(left, top + corner)
+                        quadraticBezierTo(left, top, left + corner, top)
+                        close()
+                    }
+                    drawPath(path, color = TextPrimary, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
+
+                    // Vertical line on left third
+                    drawLine(
+                        color = TextPrimary,
+                        start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
+                        end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
+                        strokeWidth = stroke,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                }
             }
         }
 
-        // New chat button (improved icon)
+        // New chat button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -396,10 +505,10 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Icon(
-                Icons.Default.Edit,
+                Icons.Outlined.Edit,
                 null,
-                tint = OrionPurple,
-                modifier = Modifier.size(22.dp)
+                tint = TextPrimary,
+                modifier = Modifier.size(20.dp)
             )
             Text(
                 "New chat",
@@ -464,16 +573,24 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
 }
 
 // ============================================
-// EMPTY STATE — pulsing star
+// EMPTY STATE — 4-point sparkle
 // ============================================
 @Composable
 fun EmptyState(greeting: String) {
     val transition = rememberInfiniteTransition()
     val scale by transition.animateFloat(
-        initialValue = 0.95f,
+        initialValue = 0.9f,
         targetValue = 1.08f,
         animationSpec = infiniteRepeatable(
-            tween(2200, easing = FastOutSlowInEasing),
+            tween(2400, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse
+        )
+    )
+    val glowAlpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            tween(2400, easing = FastOutSlowInEasing),
             RepeatMode.Reverse
         )
     )
@@ -485,42 +602,43 @@ fun EmptyState(greeting: String) {
     ) {
         Box(
             modifier = Modifier
-                .size(140.dp)
+                .size(160.dp)
                 .scale(scale),
             contentAlignment = Alignment.Center
         ) {
+            // Glow
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
-                            listOf(StarRed.copy(alpha = 0.5f), Color.Transparent)
+                            listOf(
+                                StarRed.copy(alpha = glowAlpha),
+                                OrionPurple.copy(alpha = glowAlpha * 0.4f),
+                                Color.Transparent
+                            )
                         )
                     )
             )
-            Icon(
-                Icons.Default.Star,
-                null,
-                tint = StarRed,
-                modifier = Modifier.size(72.dp)
-            )
+            // 4-point sparkle
+            SparkleStar(modifier = Modifier, size = 90)
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(28.dp))
 
         Text(
             greeting,
             color = TextPrimary,
-            fontSize = 28.sp,
+            fontSize = 26.sp,
             fontWeight = FontWeight.Light,
-            modifier = Modifier.padding(horizontal = 24.dp)
+            modifier = Modifier.padding(horizontal = 32.dp)
         )
     }
 }
 
 // ============================================
-// INPUT BAR (no placeholder text, cleaner)
+// INPUT BAR — no placeholder
 // ============================================
 @Composable
 fun InputBar(text: String, onTextChange: (String) -> Unit, onSend: () -> Unit) {
