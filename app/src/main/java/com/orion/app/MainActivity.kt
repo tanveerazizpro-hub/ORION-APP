@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -36,7 +35,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Memory
@@ -77,7 +75,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -131,35 +131,26 @@ fun OrionTheme(content: @Composable () -> Unit) {
 }
 
 // ============================================
-// 4-POINT SPARKLE ICON (custom)
+// 4-POINT SPARKLE
 // ============================================
-fun DrawScope.drawFourPointSparkle(
-    center: Offset,
-    size: Float,
-    brush: Brush
-) {
+fun DrawScope.drawFourPointSparkle(center: Offset, size: Float, brush: Brush) {
     val path = Path().apply {
-        // Top point
         moveTo(center.x, center.y - size)
-        // Right-inner
         cubicTo(
             center.x + size * 0.15f, center.y - size * 0.15f,
             center.x + size * 0.15f, center.y - size * 0.15f,
             center.x + size, center.y
         )
-        // Bottom point
         cubicTo(
             center.x + size * 0.15f, center.y + size * 0.15f,
             center.x + size * 0.15f, center.y + size * 0.15f,
             center.x, center.y + size
         )
-        // Left point
         cubicTo(
             center.x - size * 0.15f, center.y + size * 0.15f,
             center.x - size * 0.15f, center.y + size * 0.15f,
             center.x - size, center.y
         )
-        // Back to top
         cubicTo(
             center.x - size * 0.15f, center.y - size * 0.15f,
             center.x - size * 0.15f, center.y - size * 0.15f,
@@ -171,19 +162,14 @@ fun DrawScope.drawFourPointSparkle(
 }
 
 @Composable
-fun SparkleStar(
-    modifier: Modifier = Modifier,
-    size: Int = 72
-) {
+fun SparkleStar(modifier: Modifier = Modifier, size: Int = 72) {
     Canvas(modifier = modifier.size(size.dp)) {
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
         val radius = this.size.minDimension / 2f
         drawFourPointSparkle(
             center = center,
             size = radius,
-            brush = Brush.linearGradient(
-                listOf(OrionPurple, OrionPink, OrionOrange)
-            )
+            brush = Brush.linearGradient(listOf(OrionPurple, OrionPink, OrionOrange))
         )
     }
 }
@@ -223,10 +209,14 @@ fun OrionApp() {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        // STRONG SCRIM — hides content behind completely
+        scrimColor = Color.Black.copy(alpha = 0.75f),
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = Surface1,
-                drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
+                drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
+                // Force drawer to be opaque and cover full height
+                modifier = Modifier.fillMaxSize()
             ) {
                 SidebarContent(sessions, onClose = { scope.launch { drawerState.close() } })
             }
@@ -292,7 +282,7 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Hamburger
+        // Hamburger (2 lines)
         IconButton(onClick = onMenuClick) {
             Canvas(modifier = Modifier.size(24.dp)) {
                 val strokeWidth = 2.dp.toPx()
@@ -306,14 +296,14 @@ fun TopBar(
                     start = Offset(startX, centerY - lineGap / 2),
                     end = Offset(endX, centerY - lineGap / 2),
                     strokeWidth = strokeWidth,
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    cap = StrokeCap.Round
                 )
                 drawLine(
                     color = TextPrimary,
                     start = Offset(startX, centerY + lineGap / 2),
                     end = Offset(endX, centerY + lineGap / 2),
                     strokeWidth = strokeWidth,
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    cap = StrokeCap.Round
                 )
             }
         }
@@ -409,7 +399,6 @@ fun TopBar(
 
         Spacer(Modifier.weight(1f))
 
-        // New chat (top-right)
         IconButton(onClick = onNewChatClick) {
             Icon(
                 Icons.Default.Edit,
@@ -419,7 +408,6 @@ fun TopBar(
             )
         }
 
-        // Avatar
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -433,13 +421,14 @@ fun TopBar(
 }
 
 // ============================================
-// SIDEBAR — Gemini-style collapse icon (no X)
+// SIDEBAR
 // ============================================
 @Composable
 fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Surface1)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
@@ -456,7 +445,7 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Light
             )
-            // Collapse icon (like Gemini — rectangle with vertical line on left)
+            // Gemini-style collapse icon
             IconButton(onClick = onClose) {
                 Canvas(modifier = Modifier.size(24.dp)) {
                     val stroke = 2.dp.toPx()
@@ -465,7 +454,6 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                     val top = (size.height - rectSize) / 2f
                     val corner = 5.dp.toPx()
 
-                    // Rounded rectangle outline
                     val path = Path().apply {
                         moveTo(left + corner, top)
                         lineTo(left + rectSize - corner, top)
@@ -478,21 +466,19 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                         quadraticBezierTo(left, top, left + corner, top)
                         close()
                     }
-                    drawPath(path, color = TextPrimary, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
+                    drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
 
-                    // Vertical line on left third
                     drawLine(
                         color = TextPrimary,
                         start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
                         end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
                         strokeWidth = stroke,
-                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        cap = StrokeCap.Round
                     )
                 }
             }
         }
 
-        // New chat button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -573,7 +559,7 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
 }
 
 // ============================================
-// EMPTY STATE — 4-point sparkle
+// EMPTY STATE
 // ============================================
 @Composable
 fun EmptyState(greeting: String) {
@@ -606,7 +592,6 @@ fun EmptyState(greeting: String) {
                 .scale(scale),
             contentAlignment = Alignment.Center
         ) {
-            // Glow
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -621,7 +606,6 @@ fun EmptyState(greeting: String) {
                         )
                     )
             )
-            // 4-point sparkle
             SparkleStar(modifier = Modifier, size = 90)
         }
 
@@ -638,7 +622,7 @@ fun EmptyState(greeting: String) {
 }
 
 // ============================================
-// INPUT BAR — no placeholder
+// INPUT BAR
 // ============================================
 @Composable
 fun InputBar(text: String, onTextChange: (String) -> Unit, onSend: () -> Unit) {
