@@ -193,7 +193,6 @@ class MainActivity : ComponentActivity() {
 fun OrionApp() {
     val context = LocalContext.current
 
-    // Init ModelManager once on app start
     LaunchedEffect(Unit) {
         ModelManager.init(context)
     }
@@ -213,7 +212,6 @@ fun OrionApp() {
 
     val sessions = emptyList<ChatSession>()
 
-    // Full-screen Settings overlay
     if (showSettings) {
         SettingsScreen(onClose = { showSettings = false })
         return
@@ -550,32 +548,6 @@ fun SidebarContent(
             )
         }
 
-        Spacer(Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .clickable { onOpenSettings() }
-                .padding(20.dp, 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Icon(
-                Icons.Default.Settings,
-                null,
-                tint = TextPrimary,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                "Settings",
-                color = TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
-
         Spacer(Modifier.height(20.dp))
 
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -620,12 +592,15 @@ fun SidebarContent(
                 )
                 Text("PRO", color = TextMuted, fontSize = 12.sp)
             }
-            Icon(
-                Icons.Default.Settings,
-                null,
-                tint = TextMuted,
-                modifier = Modifier.size(22.dp)
-            )
+            // THIS IS THE GEAR ICON AT THE BOTTOM, NOW WIRED UP
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    Icons.Default.Settings,
+                    "Settings",
+                    tint = TextMuted,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
     }
 }
