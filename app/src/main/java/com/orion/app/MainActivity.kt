@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -40,7 +42,6 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Settings
@@ -66,12 +67,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -91,6 +97,9 @@ val TextMuted = Color(0xFF8891B0)
 val OrionPurple = Color(0xFF9B6BFF)
 val OrionPink = Color(0xFFFF5C9E)
 val OrionOrange = Color(0xFFFF8C42)
+val StarRed = Color(0xFFFF5C7A)
+
+val OrionGradient = Brush.linearGradient(listOf(OrionPurple, OrionPink, OrionOrange))
 
 // ============================================
 // DATA
@@ -122,9 +131,9 @@ fun OrionTheme(content: @Composable () -> Unit) {
 }
 
 // ============================================
-// STATIC 4-POINT SPARKLE
+// 4-POINT SPARKLE
 // ============================================
-fun DrawScope.drawFourPointSparkle(center: Offset, size: Float) {
+fun DrawScope.drawFourPointSparkle(center: Offset, size: Float, brush: Brush) {
     val path = Path().apply {
         moveTo(center.x, center.y - size)
         cubicTo(
@@ -149,7 +158,7 @@ fun DrawScope.drawFourPointSparkle(center: Offset, size: Float) {
         )
         close()
     }
-    drawPath(path, Brush.linearGradient(listOf(OrionPurple, OrionPink, OrionOrange)))
+    drawPath(path, brush)
 }
 
 @Composable
@@ -157,7 +166,11 @@ fun SparkleStar(modifier: Modifier = Modifier, size: Int = 72) {
     Canvas(modifier = modifier.size(size.dp)) {
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
         val radius = this.size.minDimension / 2f
-        drawFourPointSparkle(center, radius)
+        drawFourPointSparkle(
+            center = center,
+            size = radius,
+            brush = Brush.linearGradient(listOf(OrionPurple, OrionPink, OrionOrange))
+        )
     }
 }
 
@@ -178,6 +191,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun OrionApp() {
     var isSidebarOpen by remember { mutableStateOf(false) }
+    val sidebarWidth by animateDpAsState(
+        targetValue = if (isSidebarOpen) 300.dp else 0.dp,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "sidebarWidth"
+    )
+
     var currentTier by remember { mutableStateOf(Tier.PRIME) }
     var extendedMode by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
@@ -193,9 +212,9 @@ fun OrionApp() {
     )
 
     Row(modifier = Modifier.fillMaxSize().background(DeepSpace)) {
-        // Adaptive Sidebar (Instant toggle, no animation)
-        if (isSidebarOpen) {
-            Box(modifier = Modifier.width(300.dp).fillMaxHeight()) {
+        // Adaptive Sidebar (Pushes content, does not overlay)
+        Box(modifier = Modifier.width(sidebarWidth).fillMaxHeight()) {
+            if (sidebarWidth > 0.dp) {
                 SidebarContent(sessions, onClose = { isSidebarOpen = false })
             }
         }
@@ -258,6 +277,18 @@ fun TopBar(
 ) {
     var dropdownOpen by remember { mutableStateOf(false) }
 
+    // Smooth animation states for the hamburger menu
+    val hamburgerAlpha by animateFloatAsState(
+        targetValue = if (isSidebarOpen) 0f else 1f,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "hamburgerAlpha"
+    )
+    val hamburgerScale by animateFloatAsState(
+        targetValue = if (isSidebarOpen) 0.8f else 1f,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "hamburgerScale"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -265,19 +296,42 @@ fun TopBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Standard lightweight hamburger menu
-        if (!isSidebarOpen) {
-            IconButton(onClick = onMenuClick) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "Open Sidebar",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(24.dp)
-                )
+        // 2-line hamburger menu to OPEN sidebar (Animated)
+        Box(
+            modifier = Modifier
+                .width(48.dp)
+                .clipToBounds(),
+            contentAlignment = Alignment.Center
+        ) {
+            IconButton(
+                onClick = onMenuClick,
+                modifier = Modifier
+                    .alpha(hamburgerAlpha)
+                    .scale(hamburgerScale)
+            ) {
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val strokeWidth = 2.dp.toPx()
+                    val lineGap = 8.dp.toPx()
+                    val centerY = size.height / 2f
+                    val startX = 3.dp.toPx()
+                    val endX = size.width - 3.dp.toPx()
+
+                    drawLine(
+                        color = TextPrimary,
+                        start = Offset(startX, centerY - lineGap / 2),
+                        end = Offset(endX, centerY - lineGap / 2),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = TextPrimary,
+                        start = Offset(startX, centerY + lineGap / 2),
+                        end = Offset(endX, centerY + lineGap / 2),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round
+                    )
+                }
             }
-        } else {
-            // Spacer to keep layout consistent when hamburger is hidden
-            Spacer(modifier = Modifier.size(48.dp))
         }
 
         // Tier pill
@@ -295,7 +349,7 @@ fun TopBar(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(OrionPurple) // Solid color instead of gradient
+                        .background(OrionGradient)
                 )
                 Text(
                     text = if (extendedMode) "${currentTier.display} Extended" else "Orion ${currentTier.display}",
@@ -384,7 +438,7 @@ fun TopBar(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(OrionPurple), // Solid color instead of gradient
+                .background(Brush.linearGradient(listOf(OrionPurple, OrionPink))),
             contentAlignment = Alignment.Center
         ) {
             Text("T", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -420,14 +474,37 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
             
             Spacer(Modifier.weight(1f))
 
-            // Lightweight close button
+            // Gemini-style collapse icon to CLOSE sidebar (Top Right)
             IconButton(onClick = onClose) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "Close Sidebar",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(24.dp)
-                )
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val stroke = 2.dp.toPx()
+                    val rectSize = 20.dp.toPx()
+                    val left = (size.width - rectSize) / 2f
+                    val top = (size.height - rectSize) / 2f
+                    val corner = 5.dp.toPx()
+
+                    val path = Path().apply {
+                        moveTo(left + corner, top)
+                        lineTo(left + rectSize - corner, top)
+                        quadraticBezierTo(left + rectSize, top, left + rectSize, top + corner)
+                        lineTo(left + rectSize, top + rectSize - corner)
+                        quadraticBezierTo(left + rectSize, top + rectSize, left + rectSize - corner, top + rectSize)
+                        lineTo(left + corner, top + rectSize)
+                        quadraticBezierTo(left, top + rectSize, left, top + rectSize - corner)
+                        lineTo(left, top + corner)
+                        quadraticBezierTo(left, top, left + corner, top)
+                        close()
+                    }
+                    drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
+
+                    drawLine(
+                        color = TextPrimary,
+                        start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
+                        end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+                }
             }
         }
 
@@ -486,7 +563,7 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
                 modifier = Modifier
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(OrionPurple),
+                    .background(Brush.linearGradient(listOf(OrionPurple, OrionPink))),
                 contentAlignment = Alignment.Center
             ) {
                 Text("T", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -511,15 +588,22 @@ fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit) {
 }
 
 // ============================================
-// EMPTY STATE (Optimized Pulsing Animation)
+// EMPTY STATE (Pulsing Animation)
 // ============================================
 @Composable
 fun EmptyState(greeting: String) {
-    // GPU-accelerated animation using graphicsLayer
     val transition = rememberInfiniteTransition()
     val scale by transition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.05f,
+        initialValue = 0.9f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            tween(2400, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse
+        )
+    )
+    val glowAlpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.6f,
         animationSpec = infiniteRepeatable(
             tween(2400, easing = FastOutSlowInEasing),
             RepeatMode.Reverse
@@ -533,16 +617,28 @@ fun EmptyState(greeting: String) {
     ) {
         Box(
             modifier = Modifier
-                .size(120.dp)
+                .size(160.dp)
                 .graphicsLayer {
-                    // graphicsLayer offloads the animation entirely to the GPU render thread.
-                    // It does NOT trigger a layout remeasure or redraw on the main thread.
                     scaleX = scale
                     scaleY = scale
                 },
             contentAlignment = Alignment.Center
         ) {
-            SparkleStar(modifier = Modifier, size = 80)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                StarRed.copy(alpha = glowAlpha),
+                                OrionPurple.copy(alpha = glowAlpha * 0.4f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+            SparkleStar(modifier = Modifier, size = 90)
         }
 
         Spacer(Modifier.height(28.dp))
