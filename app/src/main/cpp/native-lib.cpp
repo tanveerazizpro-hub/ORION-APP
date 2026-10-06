@@ -20,7 +20,6 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
 
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = 0;      // CPU only (Mali Vulkan broken)
-    model_params.use_mmap     = true;   // Lower RAM usage
 
     g_model = llama_model_load_from_file(path, model_params);
     env->ReleaseStringUTFChars(modelPath, path);
