@@ -16,8 +16,6 @@ static llama_model*   g_model = nullptr;
 static llama_context* g_ctx   = nullptr;
 
 // Pin current thread + all future children to the fastest CPU cores.
-// Reads /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq to find them,
-// so it works regardless of the core numbering layout on different devices.
 static void pinToBigCores() {
     std::vector<std::pair<long, int>> cores;
     for (int i = 0; i < 8; i++) {
@@ -51,7 +49,6 @@ static void pinToBigCores() {
          pinnedCount, topFreq, rc);
 }
 
-// Restore affinity to all cores (for JNI thread hygiene)
 static void unpinFromBigCores() {
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -70,7 +67,7 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
     llama_backend_init();
 
     llama_model_params model_params = llama_model_default_params();
-    model_params.n_gpu_layers = 0;      // CPU only (Mali Vulkan broken)
+    model_params.n_gpu_layers = 0;
 
     g_model = llama_model_load_from_file(path, model_params);
     env->ReleaseStringUTFChars(modelPath, path);
@@ -83,7 +80,7 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx           = 4096;
-    ctx_params.n_threads       = 4;     // A76 cluster (pinned above)
+    ctx_params.n_threads       = 4;
     ctx_params.n_threads_batch = 4;
 
     g_ctx = llama_init_from_model(g_model, ctx_params);
@@ -100,11 +97,23 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
     return JNI_TRUE;
 }
 
+// Streaming generate: invokes callback.onToken(String) for each generated token.
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_orion_app_LlamaEngine_generate(JNIEnv* env, jobject, jstring prompt,
-                                        jint maxTokens, jfloat temp, jint threads) {
+Java_com_orion_app_LlamaEngine_generateStreaming(
+        JNIEnv* env, jobject,
+        jstring prompt, jint maxTokens, jfloat temp, jint threads,
+        jobject callback) {
+
     if (!g_model || !g_ctx) {
         LOGE("Model not loaded");
+        return env->NewStringUTF("");
+    }
+
+    // Resolve the callback method once.
+    jclass cbClass = env->GetObjectClass(callback);
+    jmethodID onTokenMethod = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)V");
+    if (onTokenMethod == nullptr) {
+        LOGE("Failed to find onToken method on callback");
         return env->NewStringUTF("");
     }
 
@@ -116,14 +125,12 @@ Java_com_orion_app_LlamaEngine_generate(JNIEnv* env, jobject, jstring prompt,
 
     const llama_vocab* vocab = llama_model_get_vocab(g_model);
 
-    // Tokenize the prompt
     int n_prompt = -llama_tokenize(vocab, prompt_text.c_str(), prompt_text.size(),
                                    nullptr, 0, true, true);
     std::vector<llama_token> tokens(n_prompt);
     llama_tokenize(vocab, prompt_text.c_str(), prompt_text.size(),
                    tokens.data(), tokens.size(), true, true);
 
-    // Feed prompt to context
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
     if (llama_decode(g_ctx, batch)) {
         LOGE("Failed to decode prompt");
@@ -131,7 +138,6 @@ Java_com_orion_app_LlamaEngine_generate(JNIEnv* env, jobject, jstring prompt,
         return env->NewStringUTF("");
     }
 
-    // Sampler chain
     auto sparams = llama_sampler_chain_default_params();
     llama_sampler* smpl = llama_sampler_chain_init(sparams);
     llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
@@ -145,7 +151,17 @@ Java_com_orion_app_LlamaEngine_generate(JNIEnv* env, jobject, jstring prompt,
 
         char buf[256];
         int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, true);
-        if (n > 0) result.append(buf, n);
+        if (n > 0) {
+            std::string piece(buf, n);
+            result += piece;
+
+            // Stream to Kotlin
+            jstring jpiece = env->NewStringUTF(piece.c_str());
+            if (jpiece != nullptr) {
+                env->CallVoidMethod(callback, onTokenMethod, jpiece);
+                env->DeleteLocalRef(jpiece);
+            }
+        }
 
         llama_batch nb = llama_batch_get_one(&tok, 1);
         if (llama_decode(g_ctx, nb)) break;
