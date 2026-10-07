@@ -7,7 +7,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 data class ChatMessage(
-    val role: String,     // "user" or "assistant"
+    val role: String,
     val content: String
 )
 
@@ -33,6 +33,8 @@ object LlamaEngine {
         callback: TokenCallback
     ): String
     external fun freeModel()
+    external fun setLogFile(path: String)
+    external fun getLogTail(maxLines: Int): String
 
     fun getModelsDir(context: Context): File {
         val dir = File(context.getExternalFilesDir(null), "models")
@@ -51,16 +53,35 @@ object LlamaEngine {
         return File(getModelsDir(context), modelName).absolutePath
     }
 
+    /** One-time call to redirect llama.cpp logs to a file in app storage. */
+    fun configureLogging(context: Context) {
+        val logFile = File(context.filesDir, "orion_log.txt")
+        try {
+            setLogFile(logFile.absolutePath)
+        } catch (e: Exception) {
+            // Native lib not ready — safe to ignore
+        }
+    }
+
+    fun readLogTail(context: Context, maxLines: Int = 300): String {
+        return try { getLogTail(maxLines) } catch (e: Exception) {
+            "Could not read log: ${e.message}"
+        }
+    }
+
+    /** Clear the log file. Useful before testing a specific scenario. */
+    fun clearLog(context: Context) {
+        val logFile = File(context.filesDir, "orion_log.txt")
+        if (logFile.exists()) logFile.delete()
+        // Re-install so the file gets recreated
+        configureLogging(context)
+    }
+
     suspend fun loadModelAsync(path: String): Boolean = withContext(Dispatchers.IO) {
         try { freeModel() } catch (_: Exception) {}
         loadModel(path)
     }
 
-    /**
-     * Generates a response using the full conversation history.
-     * onToken fires on the IO thread for each generated token.
-     * Returns the full response string when finished.
-     */
     suspend fun generateStreamingAsync(
         messages: List<ChatMessage>,
         modelName: String,
