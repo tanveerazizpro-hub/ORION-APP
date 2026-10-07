@@ -133,13 +133,23 @@ static void pinToBigCores() {
         f >> freq;
         if (freq > 0) cores.push_back({freq, i});
     }
-    if (cores.empty()) return;
+    if (cores.empty()) {
+        writeLogLine("WARN", "pinToBigCores: no cpufreq info, skipping pin");
+        return;
+    }
     std::sort(cores.begin(), cores.end(), [](auto& a, auto& b) { return a.first > b.first; });
     long topFreq = cores[0].first;
     cpu_set_t set;
     CPU_ZERO(&set);
-    for (auto& [freq, id] : cores) if (freq == topFreq) CPU_SET(id, &set);
-    sched_setaffinity(0, sizeof(set), &set);
+    int pinned = 0;
+    for (auto& [freq, id] : cores) {
+        if (freq == topFreq) { CPU_SET(id, &set); pinned++; }
+    }
+    int rc = sched_setaffinity(0, sizeof(set), &set);
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "pinToBigCores: pinned to %d cores at %ld kHz (rc=%d)", pinned, topFreq, rc);
+    writeLogLine("INFO", msg);
 }
 
 static void unpinFromBigCores() {
@@ -150,7 +160,6 @@ static void unpinFromBigCores() {
     sched_setaffinity(0, sizeof(set), &set);
 }
 
-// Free current model + context + reset state
 static void freeInternal() {
     if (g_ctx)   { llama_free(g_ctx); g_ctx = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
@@ -166,7 +175,6 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
 
     std::lock_guard<std::mutex> lock(g_loadMutex);
 
-    // Fast path: already loaded with same file + same context
     if (g_model && g_ctx && pathStr == g_loadedPath && nCtx == g_loadedCtx) {
         writeLogLine("INFO", "loadModel: same model+ctx already loaded, skipping");
         g_loadProgress.store(100);
@@ -176,7 +184,6 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
     g_loadProgress.store(0);
     writeLogLine("INFO", "loadModel called");
 
-    // Free any previous model before loading new one
     freeInternal();
 
     pinToBigCores();
@@ -193,10 +200,14 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
         return JNI_FALSE;
     }
 
+    // ============================================================
+    // 2 threads on 2 A76 cores — verified fastest config on Helio G99
+    // (Termux: 2 threads + taskset -c 6,7 = 15.84 tok/s vs 13.12 at 4 threads)
+    // ============================================================
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx           = nCtx;
-    ctx_params.n_threads       = 4;
-    ctx_params.n_threads_batch = 4;
+    ctx_params.n_threads       = 2;
+    ctx_params.n_threads_batch = 2;
 
     g_ctx = llama_init_from_model(g_model, ctx_params);
     if (!g_ctx) {
@@ -234,7 +245,6 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
 
     const llama_vocab* vocab = llama_model_get_vocab(g_model);
 
-    // Clear KV cache between turns so old context doesn't leak.
     llama_memory_clear(llama_get_memory(g_ctx), true);
 
     int n_prompt = -llama_tokenize(vocab, prompt_text.c_str(), prompt_text.size(),
