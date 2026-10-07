@@ -247,7 +247,6 @@ fun OrionApp() {
         loadProgress = -1
         statusMessage = "Loading ${currentTier.display}..."
 
-        // Poll native progress every 250ms while loading
         val poller = scope.launch(Dispatchers.Main) {
             while (isModelLoading) {
                 try { loadProgress = LlamaEngine.getLoadProgress() } catch (_: Exception) {}
@@ -337,6 +336,8 @@ fun OrionApp() {
                                 val buffer = StringBuilder()
                                 val lock = Any()
                                 var finished = false
+                                var tokenCount = 0
+                                val startTime = System.currentTimeMillis()
 
                                 val flusher = launch(Dispatchers.Main) {
                                     while (!finished) {
@@ -352,14 +353,26 @@ fun OrionApp() {
                                         modelName = assigned,
                                         maxTokens = maxTokens,
                                         temp = 0.8f,
-                                        onToken = { piece -> synchronized(lock) { buffer.append(piece) } }
+                                        onToken = { piece ->
+                                            tokenCount++
+                                            synchronized(lock) { buffer.append(piece) }
+                                        }
                                     )
                                     finished = true
                                     flusher.cancel()
 
+                                    val elapsed = System.currentTimeMillis() - startTime
+                                    val tokPerSec = if (elapsed > 0) tokenCount * 1000.0 / elapsed else 0.0
                                     val cleaned = cleanMarkdown(fullResult.trim())
                                         .ifEmpty { "(empty response)" }
-                                    conversation = conversation + ChatMessage("assistant", cleaned)
+
+                                    conversation = conversation + ChatMessage(
+                                        role = "assistant",
+                                        content = cleaned,
+                                        tokenCount = tokenCount,
+                                        tokPerSec = tokPerSec,
+                                        elapsedMs = elapsed
+                                    )
                                     streamingText = ""
                                 } catch (e: Exception) {
                                     finished = true
@@ -751,7 +764,6 @@ fun ChatArea(
                 if (streamingText.isNotEmpty()) {
                     MessageBubble(ChatMessage("assistant", streamingText))
                 } else {
-                    // Animated typing dots while waiting for the first token
                     TypingIndicatorBubble()
                 }
             }
@@ -839,7 +851,7 @@ fun WelcomeScreen(statusMessage: String, isModelLoading: Boolean, loadProgress: 
 }
 
 // ============================================
-// TYPING INDICATOR (three pulsing dots)
+// TYPING INDICATOR
 // ============================================
 @Composable
 fun TypingIndicatorBubble() {
@@ -905,27 +917,45 @@ fun MessageBubble(message: ChatMessage) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 18.dp,
-                        topEnd = 18.dp,
-                        bottomStart = if (isUser) 18.dp else 4.dp,
-                        bottomEnd = if (isUser) 4.dp else 18.dp
-                    )
-                )
-                .background(bubbleBrush)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+        Column(
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
-            Text(
-                message.content,
-                color = if (isUser) UserBubbleText else TextPrimary,
-                fontSize = 15.sp,
-                lineHeight = 22.sp,
-                fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal
-            )
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = 18.dp,
+                            topEnd = 18.dp,
+                            bottomStart = if (isUser) 18.dp else 4.dp,
+                            bottomEnd = if (isUser) 4.dp else 18.dp
+                        )
+                    )
+                    .background(bubbleBrush)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Text(
+                    message.content,
+                    color = if (isUser) UserBubbleText else TextPrimary,
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                    fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal
+                )
+            }
+
+            // Speed stats under assistant messages only
+            if (!isUser && message.tokenCount > 0) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${message.tokenCount} tokens • %.1f tok/s • %.1fs".format(
+                        message.tokPerSec,
+                        message.elapsedMs / 1000.0
+                    ),
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                )
+            }
         }
     }
 }
