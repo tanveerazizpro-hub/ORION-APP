@@ -25,6 +25,17 @@ class TokenCallback(val block: (String) -> Unit) {
 object LlamaEngine {
     init { System.loadLibrary("orion") }
 
+    // ============================================================
+    // System prompt — shapes model behavior on every conversation.
+    // Kept short so it doesn't eat into the context window.
+    // ============================================================
+    private const val SYSTEM_PROMPT =
+        "You are O.R.I.O.N., a precise and helpful AI assistant. " +
+        "Answer clearly and directly. Use plain language. " +
+        "If you are unsure, say so instead of guessing. " +
+        "If the question is simple, keep the answer short. " +
+        "If it needs reasoning, think step by step."
+
     external fun loadModel(modelPath: String, nCtx: Int): Boolean
     external fun isModelLoaded(modelPath: String, nCtx: Int): Boolean
     external fun generateStreaming(
@@ -60,18 +71,11 @@ object LlamaEngine {
         configureLogging(context)
     }
 
-    /**
-     * Load a model with explicit context size.
-     * Returns null on success, error string on failure.
-     * If the same model + same context is already loaded, this returns
-     * immediately without reloading.
-     */
     suspend fun loadModelAsync(context: Context, path: String, nCtx: Int): String? =
         withContext(Dispatchers.IO) {
             val file = File(path)
             if (!file.exists()) return@withContext "Model file not found"
             if (file.length() == 0L) return@withContext "Model file is empty"
-
             val ok = loadModel(path, nCtx)
             if (!ok) "Failed to load model" else null
         }
@@ -88,35 +92,49 @@ object LlamaEngine {
         generateStreaming(prompt, maxTokens, temp, 4, callback)
     }
 
+    /**
+     * Build a prompt for the model using its native chat template.
+     * Prepends a system message so the model knows how to behave.
+     */
     private fun buildPrompt(messages: List<ChatMessage>, modelName: String): String {
         val lower = modelName.lowercase()
         return when {
-            lower.contains("lfm2") -> {
-                val sb = StringBuilder("<|startoftext|>")
-                for (msg in messages) {
-                    sb.append("<|im_start|>").append(msg.role).append("\n")
-                    sb.append(msg.content).append("<|im_end|>\n")
-                }
-                sb.append("<|im_start|>assistant\n").toString()
-            }
-            lower.contains("qwen") || lower.contains("minicpm") -> {
-                val sb = StringBuilder()
-                for (msg in messages) {
-                    sb.append("<|im_start|>").append(msg.role).append("\n")
-                    sb.append(msg.content).append("<|im_end|>\n")
-                }
-                sb.append("<|im_start|>assistant\n").toString()
-            }
-            lower.contains("zaya") -> {
-                val sb = StringBuilder()
-                for (msg in messages) {
-                    val tag = if (msg.role == "user") "User" else "Assistant"
-                    sb.append(tag).append(": ").append(msg.content).append("\n")
-                }
-                sb.append("Assistant:").toString()
-            }
-            else -> messages.joinToString("\n") { "${it.role}: ${it.content}" } + "\nassistant:"
+            lower.contains("lfm2") -> buildChatML(messages, includeStartOfText = true)
+            lower.contains("qwen") -> buildChatML(messages, includeStartOfText = false)
+            lower.contains("minicpm") -> buildChatML(messages, includeStartOfText = false)
+            lower.contains("zaya") -> buildZaya(messages)
+            else -> buildChatML(messages, includeStartOfText = false)
         }
+    }
+
+    // ChatML format used by LFM2, Qwen, MiniCPM
+    private fun buildChatML(messages: List<ChatMessage>, includeStartOfText: Boolean): String {
+        val sb = StringBuilder()
+        if (includeStartOfText) sb.append("<|startoftext|>")
+
+        // System prompt first
+        sb.append("<|im_start|>system\n")
+        sb.append(SYSTEM_PROMPT)
+        sb.append("<|im_end|>\n")
+
+        // Then conversation history
+        for (msg in messages) {
+            sb.append("<|im_start|>").append(msg.role).append("\n")
+            sb.append(msg.content).append("<|im_end|>\n")
+        }
+        sb.append("<|im_start|>assistant\n")
+        return sb.toString()
+    }
+
+    private fun buildZaya(messages: List<ChatMessage>): String {
+        val sb = StringBuilder()
+        sb.append("System: ").append(SYSTEM_PROMPT).append("\n\n")
+        for (msg in messages) {
+            val tag = if (msg.role == "user") "User" else "Assistant"
+            sb.append(tag).append(": ").append(msg.content).append("\n")
+        }
+        sb.append("Assistant:")
+        return sb.toString()
     }
 
     fun unloadModel() { try { freeModel() } catch (_: Exception) {} }
