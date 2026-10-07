@@ -11,10 +11,9 @@ set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
 
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-
 # -mcpu tunes instruction scheduling for Cortex-A76 specifically.
 # NO -ffast-math: it implies -ffinite-math-only, which breaks GGML.
+# NO LTO: cross-compiling with LTO breaks the linker (ld.gold vs AArch64).
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mcpu=cortex-a76")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mcpu=cortex-a76")
 
