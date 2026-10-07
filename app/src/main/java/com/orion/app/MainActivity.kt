@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -101,6 +102,7 @@ val SurfaceContainer = Color(0xFF161C2C)
 val SurfaceContainerHigh = Color(0xFF1B2235)
 val TextPrimary = Color(0xFFE6EAF5)
 val TextMuted = Color(0xFF8891B0)
+val UserBubbleText = Color(0xFF0A0E1A)
 val OrionPurple = Color(0xFF9B6BFF)
 val OrionPink = Color(0xFFFF5C9E)
 val OrionOrange = Color(0xFFFF8C42)
@@ -219,8 +221,8 @@ fun OrionApp() {
     var inputText by remember { mutableStateOf("") }
 
     var statusMessage by remember { mutableStateOf("What should we focus on?") }
-    var userMessage by remember { mutableStateOf("") }
-    var aiResponse by remember { mutableStateOf("") }
+    var conversation by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
+    var streamingText by remember { mutableStateOf("") }
     var isModelLoading by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
 
@@ -275,15 +277,15 @@ fun OrionApp() {
                         isSidebarOpen = isSidebarOpen,
                         onMenuClick = { isSidebarOpen = true },
                         onNewChatClick = {
-                            aiResponse = ""
-                            userMessage = ""
+                            conversation = emptyList()
+                            streamingText = ""
                             statusMessage = "What should we focus on?"
                         },
                         onTierSelected = { newTier ->
                             if (newTier != currentTier) {
                                 currentTier = newTier
-                                aiResponse = ""
-                                userMessage = ""
+                                conversation = emptyList()
+                                streamingText = ""
                             }
                         },
                         onExtendedToggle = { extendedMode = !extendedMode }
@@ -303,31 +305,41 @@ fun OrionApp() {
                                 return@InputBar
                             }
 
-                            // Auto-close keyboard + clear focus
                             keyboardController?.hide()
                             focusManager.clearFocus()
 
                             inputText = ""
-                            userMessage = prompt
-                            aiResponse = ""
+                            val updatedConversation = conversation + ChatMessage("user", prompt)
+                            conversation = updatedConversation
+                            streamingText = ""
                             isGenerating = true
-                            statusMessage = "Thinking..."
+                            statusMessage = ""
 
                             val maxTokens = if (extendedMode) 4096 else 2048
                             scope.launch {
                                 try {
-                                    val result = LlamaEngine.generateAsync(
-                                        userMessage = prompt,
+                                    val fullResult = LlamaEngine.generateStreamingAsync(
+                                        messages = updatedConversation,
                                         modelName = assigned,
                                         maxTokens = maxTokens,
-                                        temp = 0.8f
+                                        temp = 0.8f,
+                                        onToken = { piece ->
+                                            streamingText += piece
+                                        }
                                     )
-                                    aiResponse = cleanMarkdown(result.trim()).ifEmpty { "(empty response)" }
+                                    // Commit the assistant reply as a permanent bubble
+                                    val cleaned = cleanMarkdown(fullResult.trim())
+                                        .ifEmpty { "(empty response)" }
+                                    conversation = conversation + ChatMessage("assistant", cleaned)
+                                    streamingText = ""
                                 } catch (e: Exception) {
-                                    aiResponse = "Error: ${e.message ?: "unknown"}"
+                                    conversation = conversation + ChatMessage(
+                                        "assistant",
+                                        "Error: ${e.message ?: "unknown"}"
+                                    )
+                                    streamingText = ""
                                 } finally {
                                     isGenerating = false
-                                    statusMessage = ""
                                 }
                             }
                         }
@@ -341,8 +353,8 @@ fun OrionApp() {
                         .background(DeepSpace)
                 ) {
                     ChatArea(
-                        userMessage = userMessage,
-                        aiResponse = aiResponse,
+                        conversation = conversation,
+                        streamingText = streamingText,
                         isGenerating = isGenerating || isModelLoading,
                         statusMessage = statusMessage
                     )
@@ -352,17 +364,16 @@ fun OrionApp() {
     }
 }
 
-// Strip basic markdown tokens so the response reads clean
 fun cleanMarkdown(text: String): String {
     return text
-        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")  // **bold** → bold
-        .replace(Regex("\\*(.+?)\\*"), "$1")         // *italic* → italic
-        .replace(Regex("^#+\\s*", RegexOption.MULTILINE), "") // # Headers
-        .replace(Regex("^\\s*-\\s+", RegexOption.MULTILINE), "• ") // - bullets
+        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+        .replace(Regex("\\*(.+?)\\*"), "$1")
+        .replace(Regex("^#+\\s*", RegexOption.MULTILINE), "")
+        .replace(Regex("^\\s*-\\s+", RegexOption.MULTILINE), "• ")
 }
 
 // ============================================
-// TOP BAR (Main)
+// TOP BAR
 // ============================================
 @Composable
 fun TopBar(
@@ -417,7 +428,6 @@ fun TopBar(
                     val centerY = size.height / 2f
                     val startX = 3.dp.toPx()
                     val endX = size.width - 3.dp.toPx()
-
                     drawLine(
                         color = TextPrimary,
                         start = Offset(startX, centerY - lineGap / 2),
@@ -575,9 +585,7 @@ fun SidebarContent(
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Light
             )
-            
             Spacer(Modifier.weight(1f))
-
             IconButton(onClick = onClose) {
                 Canvas(modifier = Modifier.size(24.dp)) {
                     val stroke = 2.dp.toPx()
@@ -585,7 +593,6 @@ fun SidebarContent(
                     val left = (size.width - rectSize) / 2f
                     val top = (size.height - rectSize) / 2f
                     val corner = 5.dp.toPx()
-
                     val path = Path().apply {
                         moveTo(left + corner, top)
                         lineTo(left + rectSize - corner, top)
@@ -599,7 +606,6 @@ fun SidebarContent(
                         close()
                     }
                     drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
-
                     drawLine(
                         color = TextPrimary,
                         start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
@@ -693,119 +699,141 @@ fun SidebarContent(
 }
 
 // ============================================
-// CHAT AREA (Star only on empty screen, scrollable response)
+// CHAT AREA
 // ============================================
 @Composable
 fun ChatArea(
-    userMessage: String,
-    aiResponse: String,
+    conversation: List<ChatMessage>,
+    streamingText: String,
     isGenerating: Boolean,
     statusMessage: String
 ) {
-    val isEmpty = userMessage.isEmpty() && aiResponse.isEmpty() && !isGenerating
+    val isEmpty = conversation.isEmpty() && streamingText.isEmpty() && !isGenerating
 
     if (isEmpty) {
-        // Welcome screen with star
-        val transition = rememberInfiniteTransition()
-        val scale by transition.animateFloat(
-            initialValue = 0.9f,
-            targetValue = 1.08f,
-            animationSpec = infiniteRepeatable(
-                tween(2400, easing = FastOutSlowInEasing),
-                RepeatMode.Reverse
-            )
-        )
-        val glowAlpha by transition.animateFloat(
-            initialValue = 0.35f,
-            targetValue = 0.6f,
-            animationSpec = infiniteRepeatable(
-                tween(2400, easing = FastOutSlowInEasing),
-                RepeatMode.Reverse
-            )
-        )
-
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(160.dp)
-                    .scale(scale),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(
-                                    StarRed.copy(alpha = glowAlpha),
-                                    OrionPurple.copy(alpha = glowAlpha * 0.4f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-                SparkleStar(modifier = Modifier, size = 90)
-            }
-
-            Spacer(Modifier.height(28.dp))
-
-            Text(
-                statusMessage.ifEmpty { "What should we focus on?" },
-                color = TextPrimary,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Light,
-                modifier = Modifier.padding(horizontal = 32.dp)
-            )
-        }
+        WelcomeScreen(statusMessage)
     } else {
-        // Conversation view — scrollable, no star
+        val scrollState = rememberScrollState()
+
+        // Auto-scroll to bottom when new content arrives
+        LaunchedEffect(conversation.size, streamingText.length) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .verticalScroll(scrollState)
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // User message (right-aligned bubble)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                Text(
-                    userMessage,
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(SurfaceContainerHigh)
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                )
+            conversation.forEach { msg ->
+                MessageBubble(msg)
             }
 
-            Spacer(Modifier.height(20.dp))
-
-            // AI response (left-aligned, plain text)
-            if (isGenerating && aiResponse.isEmpty()) {
-                Text(
-                    statusMessage.ifEmpty { "Thinking..." },
-                    color = TextMuted,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Light
-                )
-            } else {
-                Text(
-                    aiResponse,
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    lineHeight = 24.sp
-                )
+            // Live-streaming bubble
+            if (isGenerating) {
+                val liveText = streamingText.ifEmpty { "…" }
+                MessageBubble(ChatMessage("assistant", liveText))
             }
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun WelcomeScreen(statusMessage: String) {
+    val transition = rememberInfiniteTransition()
+    val scale by transition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            tween(2400, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse
+        )
+    )
+    val glowAlpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            tween(2400, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse
+        )
+    )
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(160.dp)
+                .scale(scale),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                StarRed.copy(alpha = glowAlpha),
+                                OrionPurple.copy(alpha = glowAlpha * 0.4f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+            SparkleStar(modifier = Modifier, size = 90)
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        Text(
+            statusMessage.ifEmpty { "What should we focus on?" },
+            color = TextPrimary,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Light,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        )
+    }
+}
+
+@Composable
+fun MessageBubble(message: ChatMessage) {
+    val isUser = message.role == "user"
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .clip(
+                    RoundedCornerShape(
+                        topStart = 18.dp,
+                        topEnd = 18.dp,
+                        bottomStart = if (isUser) 18.dp else 4.dp,
+                        bottomEnd = if (isUser) 4.dp else 18.dp
+                    )
+                )
+                .background(
+                    if (isUser) Brush.linearGradient(listOf(OrionPurple, OrionPink))
+                    else SurfaceContainer
+                )
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+        ) {
+            Text(
+                message.content,
+                color = if (isUser) UserBubbleText else TextPrimary,
+                fontSize = 15.sp,
+                lineHeight = 22.sp,
+                fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal
+            )
         }
     }
 }
