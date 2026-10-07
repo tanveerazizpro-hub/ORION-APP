@@ -3,8 +3,6 @@
 #include <vector>
 #include <fstream>
 #include <algorithm>
-#include <sched.h>
-#include <unistd.h>
 #include <mutex>
 #include <atomic>
 #include <ctime>
@@ -14,8 +12,6 @@
 #include "llama.h"
 
 #define TAG "OrionNative"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 static llama_model*   g_model = nullptr;
 static llama_context* g_ctx   = nullptr;
@@ -123,43 +119,6 @@ Java_com_orion_app_LlamaEngine_getLogTail(JNIEnv* env, jobject, jint maxLines) {
     return env->NewStringUTF(result.c_str());
 }
 
-static void pinToBigCores() {
-    std::vector<std::pair<long, int>> cores;
-    for (int i = 0; i < 8; i++) {
-        std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cpufreq/cpuinfo_max_freq";
-        std::ifstream f(path);
-        if (!f.is_open()) continue;
-        long freq = 0;
-        f >> freq;
-        if (freq > 0) cores.push_back({freq, i});
-    }
-    if (cores.empty()) {
-        writeLogLine("WARN", "pinToBigCores: no cpufreq info, skipping pin");
-        return;
-    }
-    std::sort(cores.begin(), cores.end(), [](auto& a, auto& b) { return a.first > b.first; });
-    long topFreq = cores[0].first;
-    cpu_set_t set;
-    CPU_ZERO(&set);
-    int pinned = 0;
-    for (auto& [freq, id] : cores) {
-        if (freq == topFreq) { CPU_SET(id, &set); pinned++; }
-    }
-    int rc = sched_setaffinity(0, sizeof(set), &set);
-    char msg[160];
-    snprintf(msg, sizeof(msg),
-             "pinToBigCores: pinned to %d cores at %ld kHz (rc=%d)", pinned, topFreq, rc);
-    writeLogLine("INFO", msg);
-}
-
-static void unpinFromBigCores() {
-    cpu_set_t set;
-    CPU_ZERO(&set);
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    for (long i = 0; i < n; i++) CPU_SET((int)i, &set);
-    sched_setaffinity(0, sizeof(set), &set);
-}
-
 static void freeInternal() {
     if (g_ctx)   { llama_free(g_ctx); g_ctx = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
@@ -182,11 +141,10 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
     }
 
     g_loadProgress.store(0);
-    writeLogLine("INFO", "loadModel called");
+    writeLogLine("INFO", "loadModel called (no pinning)");
 
     freeInternal();
 
-    pinToBigCores();
     llama_backend_init();
 
     llama_model_params model_params = llama_model_default_params();
@@ -196,32 +154,30 @@ Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath
 
     if (!g_model) {
         g_loadProgress.store(-1);
-        unpinFromBigCores();
         return JNI_FALSE;
     }
 
-    // ============================================================
-    // 2 threads on 2 A76 cores — verified fastest config on Helio G99
-    // (Termux: 2 threads + taskset -c 6,7 = 15.84 tok/s vs 13.12 at 4 threads)
-    // ============================================================
+    // 3 threads, no pinning — matches best unpinned Termux benchmark (13.34 tok/s)
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx           = nCtx;
-    ctx_params.n_threads       = 2;
-    ctx_params.n_threads_batch = 2;
+    ctx_params.n_threads       = 3;
+    ctx_params.n_threads_batch = 3;
 
     g_ctx = llama_init_from_model(g_model, ctx_params);
     if (!g_ctx) {
         llama_model_free(g_model);
         g_model = nullptr;
         g_loadProgress.store(-1);
-        unpinFromBigCores();
         return JNI_FALSE;
     }
 
     g_loadedPath = pathStr;
     g_loadedCtx  = nCtx;
     g_loadProgress.store(100);
-    unpinFromBigCores();
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Model loaded OK, n_threads=3, n_ctx=%d", nCtx);
+    writeLogLine("INFO", msg);
     return JNI_TRUE;
 }
 
@@ -236,8 +192,6 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
     jclass cbClass = env->GetObjectClass(callback);
     jmethodID onTokenMethod = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)V");
     if (onTokenMethod == nullptr) return env->NewStringUTF("");
-
-    pinToBigCores();
 
     const char* p = env->GetStringUTFChars(prompt, nullptr);
     std::string prompt_text(p);
@@ -254,7 +208,7 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
                    tokens.data(), tokens.size(), true, true);
 
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
-    if (llama_decode(g_ctx, batch)) { unpinFromBigCores(); return env->NewStringUTF(""); }
+    if (llama_decode(g_ctx, batch)) return env->NewStringUTF("");
 
     auto sparams = llama_sampler_chain_default_params();
     llama_sampler* smpl = llama_sampler_chain_init(sparams);
@@ -282,7 +236,6 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
     }
 
     llama_sampler_free(smpl);
-    unpinFromBigCores();
     return env->NewStringUTF(result.c_str());
 }
 
