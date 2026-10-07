@@ -91,6 +91,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // ============================================
@@ -318,6 +320,23 @@ fun OrionApp() {
 
                             val maxTokens = if (extendedMode) 4096 else 2048
                             scope.launch {
+                                // Buffer tokens off the UI thread, flush to Compose state every ~80ms.
+                                // This avoids re-composing the whole tree per token, which was
+                                // fighting the inference engine for CPU cycles.
+                                val buffer = StringBuilder()
+                                val lock = Any()
+                                var finished = false
+
+                                val flusher = launch(Dispatchers.Main) {
+                                    while (!finished) {
+                                        delay(80)
+                                        val snapshot = synchronized(lock) { buffer.toString() }
+                                        if (snapshot.isNotEmpty()) {
+                                            streamingText = snapshot
+                                        }
+                                    }
+                                }
+
                                 try {
                                     val fullResult = LlamaEngine.generateStreamingAsync(
                                         messages = updatedConversation,
@@ -325,14 +344,19 @@ fun OrionApp() {
                                         maxTokens = maxTokens,
                                         temp = 0.8f,
                                         onToken = { piece ->
-                                            streamingText += piece
+                                            synchronized(lock) { buffer.append(piece) }
                                         }
                                     )
+                                    finished = true
+                                    flusher.cancel()
+
                                     val cleaned = cleanMarkdown(fullResult.trim())
                                         .ifEmpty { "(empty response)" }
                                     conversation = conversation + ChatMessage("assistant", cleaned)
                                     streamingText = ""
                                 } catch (e: Exception) {
+                                    finished = true
+                                    flusher.cancel()
                                     conversation = conversation + ChatMessage(
                                         "assistant",
                                         "Error: ${e.message ?: "unknown"}"
@@ -524,9 +548,6 @@ fun TopBar(
                                 Text("Extended Mode", color = TextPrimary, fontSize = 14.sp)
                                 Text("Longer context window", color = TextMuted, fontSize = 12.sp)
                             }
-                            // Display-only switch — the row itself handles the toggle.
-                            // This prevents the double-fire bug where both the row and
-                            // the switch called onExtendedToggle() for a single tap.
                             Switch(
                                 checked = extendedMode,
                                 onCheckedChange = null
@@ -719,8 +740,10 @@ fun ChatArea(
     } else {
         val scrollState = rememberScrollState()
 
+        // Instant scroll (not animated) — cheap on CPU. Animations here were
+        // scheduling frame-clock work 12x/sec, competing with inference.
         LaunchedEffect(conversation.size, streamingText.length) {
-            scrollState.animateScrollTo(scrollState.maxValue)
+            scrollState.scrollTo(scrollState.maxValue)
         }
 
         Column(
