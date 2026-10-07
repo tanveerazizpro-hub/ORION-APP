@@ -23,16 +23,12 @@ class TokenCallback(val block: (String) -> Unit) {
 }
 
 object LlamaEngine {
-    init {
-        System.loadLibrary("orion")
-    }
+    init { System.loadLibrary("orion") }
 
-    external fun loadModel(modelPath: String): Boolean
+    external fun loadModel(modelPath: String, nCtx: Int): Boolean
+    external fun isModelLoaded(modelPath: String, nCtx: Int): Boolean
     external fun generateStreaming(
-        prompt: String,
-        maxTokens: Int,
-        temp: Float,
-        threads: Int,
+        prompt: String, maxTokens: Int, temp: Float, threads: Int,
         callback: TokenCallback
     ): String
     external fun freeModel()
@@ -47,27 +43,16 @@ object LlamaEngine {
         return dir
     }
 
-    fun listModels(context: Context): List<String> {
-        return getModelsDir(context).listFiles()
-            ?.filter { it.extension == "gguf" }
-            ?.map { it.name }
-            ?: emptyList()
-    }
-
-    fun getModelPath(context: Context, modelName: String): String {
-        return File(getModelsDir(context), modelName).absolutePath
-    }
+    fun getModelPath(context: Context, modelName: String): String =
+        File(getModelsDir(context), modelName).absolutePath
 
     fun configureLogging(context: Context) {
         val logFile = File(context.filesDir, "orion_log.txt")
         try { setLogFile(logFile.absolutePath) } catch (_: Exception) {}
     }
 
-    fun readLogTail(context: Context, maxLines: Int = 300): String {
-        return try { getLogTail(maxLines) } catch (e: Exception) {
-            "Could not read log: ${e.message}"
-        }
-    }
+    fun readLogTail(maxLines: Int = 300): String =
+        try { getLogTail(maxLines) } catch (e: Exception) { "Log error: ${e.message}" }
 
     fun clearLog(context: Context) {
         val logFile = File(context.filesDir, "orion_log.txt")
@@ -75,16 +60,21 @@ object LlamaEngine {
         configureLogging(context)
     }
 
-    suspend fun loadModelAsync(context: Context, path: String): String? = withContext(Dispatchers.IO) {
-        val file = File(path)
-        if (!file.exists()) return@withContext "Model file not found"
-        if (file.length() == 0L) return@withContext "Model file is empty or corrupted"
+    /**
+     * Load a model with explicit context size.
+     * Returns null on success, error string on failure.
+     * If the same model + same context is already loaded, this returns
+     * immediately without reloading.
+     */
+    suspend fun loadModelAsync(context: Context, path: String, nCtx: Int): String? =
+        withContext(Dispatchers.IO) {
+            val file = File(path)
+            if (!file.exists()) return@withContext "Model file not found"
+            if (file.length() == 0L) return@withContext "Model file is empty"
 
-        try { freeModel() } catch (_: Exception) {}
-
-        val ok = loadModel(path)
-        if (!ok) "Failed to load model" else null
-    }
+            val ok = loadModel(path, nCtx)
+            if (!ok) "Failed to load model" else null
+        }
 
     suspend fun generateStreamingAsync(
         messages: List<ChatMessage>,
@@ -107,26 +97,15 @@ object LlamaEngine {
                     sb.append("<|im_start|>").append(msg.role).append("\n")
                     sb.append(msg.content).append("<|im_end|>\n")
                 }
-                sb.append("<|im_start|>assistant\n")
-                sb.toString()
+                sb.append("<|im_start|>assistant\n").toString()
             }
-            lower.contains("qwen") -> {
+            lower.contains("qwen") || lower.contains("minicpm") -> {
                 val sb = StringBuilder()
                 for (msg in messages) {
                     sb.append("<|im_start|>").append(msg.role).append("\n")
                     sb.append(msg.content).append("<|im_end|>\n")
                 }
-                sb.append("<|im_start|>assistant\n")
-                sb.toString()
-            }
-            lower.contains("minicpm") -> {
-                val sb = StringBuilder()
-                for (msg in messages) {
-                    sb.append("<|im_start|>").append(msg.role).append("\n")
-                    sb.append(msg.content).append("<|im_end|>\n")
-                }
-                sb.append("<|im_start|>assistant\n")
-                sb.toString()
+                sb.append("<|im_start|>assistant\n").toString()
             }
             lower.contains("zaya") -> {
                 val sb = StringBuilder()
@@ -134,16 +113,11 @@ object LlamaEngine {
                     val tag = if (msg.role == "user") "User" else "Assistant"
                     sb.append(tag).append(": ").append(msg.content).append("\n")
                 }
-                sb.append("Assistant:")
-                sb.toString()
+                sb.append("Assistant:").toString()
             }
-            else -> {
-                messages.joinToString("\n") { "${it.role}: ${it.content}" } + "\nassistant:"
-            }
+            else -> messages.joinToString("\n") { "${it.role}: ${it.content}" } + "\nassistant:"
         }
     }
 
-    fun unloadModel() {
-        try { freeModel() } catch (_: Exception) {}
-    }
+    fun unloadModel() { try { freeModel() } catch (_: Exception) {} }
 }
