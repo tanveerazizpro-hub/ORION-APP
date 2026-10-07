@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -228,6 +229,7 @@ fun OrionApp() {
     var streamingText by remember { mutableStateOf("") }
     var isModelLoading by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
+    var loadProgress by remember { mutableStateOf(-1) }
 
     LaunchedEffect(currentTier, ModelManager.tierAssignments.value) {
         val assigned = ModelManager.tierAssignments.value[currentTier]
@@ -242,9 +244,21 @@ fun OrionApp() {
             return@LaunchedEffect
         }
         isModelLoading = true
+        loadProgress = -1
         statusMessage = "Loading ${currentTier.display}..."
+
+        // Poll native progress every 250ms while loading
+        val poller = scope.launch(Dispatchers.Main) {
+            while (isModelLoading) {
+                try { loadProgress = LlamaEngine.getLoadProgress() } catch (_: Exception) {}
+                delay(250)
+            }
+        }
+
         val error = LlamaEngine.loadModelAsync(context, path)
         isModelLoading = false
+        poller.cancel()
+        loadProgress = -1
         statusMessage = error ?: "What should we focus on?"
     }
 
@@ -320,9 +334,6 @@ fun OrionApp() {
 
                             val maxTokens = if (extendedMode) 4096 else 2048
                             scope.launch {
-                                // Buffer tokens off the UI thread, flush to Compose state every ~80ms.
-                                // This avoids re-composing the whole tree per token, which was
-                                // fighting the inference engine for CPU cycles.
                                 val buffer = StringBuilder()
                                 val lock = Any()
                                 var finished = false
@@ -331,9 +342,7 @@ fun OrionApp() {
                                     while (!finished) {
                                         delay(80)
                                         val snapshot = synchronized(lock) { buffer.toString() }
-                                        if (snapshot.isNotEmpty()) {
-                                            streamingText = snapshot
-                                        }
+                                        if (snapshot.isNotEmpty()) streamingText = snapshot
                                     }
                                 }
 
@@ -343,9 +352,7 @@ fun OrionApp() {
                                         modelName = assigned,
                                         maxTokens = maxTokens,
                                         temp = 0.8f,
-                                        onToken = { piece ->
-                                            synchronized(lock) { buffer.append(piece) }
-                                        }
+                                        onToken = { piece -> synchronized(lock) { buffer.append(piece) } }
                                     )
                                     finished = true
                                     flusher.cancel()
@@ -379,7 +386,9 @@ fun OrionApp() {
                     ChatArea(
                         conversation = conversation,
                         streamingText = streamingText,
-                        isGenerating = isGenerating || isModelLoading,
+                        isGenerating = isGenerating,
+                        isModelLoading = isModelLoading,
+                        loadProgress = loadProgress,
                         statusMessage = statusMessage
                     )
                 }
@@ -548,10 +557,7 @@ fun TopBar(
                                 Text("Extended Mode", color = TextPrimary, fontSize = 14.sp)
                                 Text("Longer context window", color = TextMuted, fontSize = 12.sp)
                             }
-                            Switch(
-                                checked = extendedMode,
-                                onCheckedChange = null
-                            )
+                            Switch(checked = extendedMode, onCheckedChange = null)
                         }
                     },
                     onClick = { onExtendedToggle() }
@@ -653,18 +659,8 @@ fun SidebarContent(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Icon(
-                Icons.Outlined.Edit,
-                null,
-                tint = TextPrimary,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                "New chat",
-                color = TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Icon(Icons.Outlined.Edit, null, tint = TextPrimary, modifier = Modifier.size(20.dp))
+            Text("New chat", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
 
         Spacer(Modifier.height(20.dp))
@@ -703,21 +699,11 @@ fun SidebarContent(
                 Text("T", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Tanveer Aziz",
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Text("Tanveer Aziz", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Text("PRO", color = TextMuted, fontSize = 12.sp)
             }
             IconButton(onClick = onOpenSettings) {
-                Icon(
-                    Icons.Default.Settings,
-                    "Settings",
-                    tint = TextMuted,
-                    modifier = Modifier.size(22.dp)
-                )
+                Icon(Icons.Default.Settings, "Settings", tint = TextMuted, modifier = Modifier.size(22.dp))
             }
         }
     }
@@ -731,17 +717,21 @@ fun ChatArea(
     conversation: List<ChatMessage>,
     streamingText: String,
     isGenerating: Boolean,
+    isModelLoading: Boolean,
+    loadProgress: Int,
     statusMessage: String
 ) {
     val isEmpty = conversation.isEmpty() && streamingText.isEmpty() && !isGenerating
 
     if (isEmpty) {
-        WelcomeScreen(statusMessage)
+        WelcomeScreen(
+            statusMessage = statusMessage,
+            isModelLoading = isModelLoading,
+            loadProgress = loadProgress
+        )
     } else {
         val scrollState = rememberScrollState()
 
-        // Instant scroll (not animated) — cheap on CPU. Animations here were
-        // scheduling frame-clock work 12x/sec, competing with inference.
         LaunchedEffect(conversation.size, streamingText.length) {
             scrollState.scrollTo(scrollState.maxValue)
         }
@@ -758,8 +748,12 @@ fun ChatArea(
             }
 
             if (isGenerating) {
-                val liveText = streamingText.ifEmpty { "…" }
-                MessageBubble(ChatMessage("assistant", liveText))
+                if (streamingText.isNotEmpty()) {
+                    MessageBubble(ChatMessage("assistant", streamingText))
+                } else {
+                    // Animated typing dots while waiting for the first token
+                    TypingIndicatorBubble()
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -768,7 +762,7 @@ fun ChatArea(
 }
 
 @Composable
-fun WelcomeScreen(statusMessage: String) {
+fun WelcomeScreen(statusMessage: String, isModelLoading: Boolean, loadProgress: Int) {
     val transition = rememberInfiniteTransition()
     val scale by transition.animateFloat(
         initialValue = 0.9f,
@@ -817,14 +811,85 @@ fun WelcomeScreen(statusMessage: String) {
 
         Spacer(Modifier.height(28.dp))
 
-        Text(
-            statusMessage.ifEmpty { "What should we focus on?" },
-            color = TextPrimary,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Light,
-            modifier = Modifier.padding(horizontal = 32.dp)
-        )
+        if (isModelLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(48.dp),
+                color = OrionPurple,
+                trackColor = SurfaceContainerHigh,
+                strokeWidth = 3.dp,
+                progress = { if (loadProgress in 0..100) loadProgress / 100f else 0f }
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                if (loadProgress in 0..100) "Loading ${loadProgress}%" else "Loading model...",
+                color = TextMuted,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Light
+            )
+        } else {
+            Text(
+                statusMessage.ifEmpty { "What should we focus on?" },
+                color = TextPrimary,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Light,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+        }
     }
+}
+
+// ============================================
+// TYPING INDICATOR (three pulsing dots)
+// ============================================
+@Composable
+fun TypingIndicatorBubble() {
+    val transition = rememberInfiniteTransition()
+
+    @Composable
+    fun dotAlpha(delayMs: Int): Float {
+        val a by transition.animateFloat(
+            initialValue = 0.25f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                tween(durationMillis = 600, delayMillis = delayMs, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse
+            )
+        )
+        return a
+    }
+
+    val a1 = dotAlpha(0)
+    val a2 = dotAlpha(150)
+    val a3 = dotAlpha(300)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))
+                .background(SurfaceContainer)
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Dot(a1)
+            Dot(a2)
+            Dot(a3)
+        }
+    }
+}
+
+@Composable
+private fun Dot(alpha: Float) {
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .alpha(alpha)
+            .clip(CircleShape)
+            .background(OrionPurple)
+    )
 }
 
 @Composable
