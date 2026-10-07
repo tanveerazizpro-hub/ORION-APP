@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.CircularProgressIndicator
@@ -96,9 +97,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// ============================================
-// COLORS
-// ============================================
 val DeepSpace = Color(0xFF0A0E1A)
 val Surface1 = Color(0xFF0F1422)
 val SurfaceContainer = Color(0xFF161C2C)
@@ -113,9 +111,6 @@ val StarRed = Color(0xFFFF5C7A)
 
 val OrionGradient = Brush.linearGradient(listOf(OrionPurple, OrionPink, OrionOrange))
 
-// ============================================
-// DATA
-// ============================================
 enum class Tier(val display: String, val subtitle: String, val icon: ImageVector) {
     SWIFT("Swift", "Instant answers", Icons.Default.Bolt),
     CORE("Core", "Balanced reasoning", Icons.Default.Memory),
@@ -125,26 +120,17 @@ enum class Tier(val display: String, val subtitle: String, val icon: ImageVector
 
 data class ChatSession(val title: String)
 
-// ============================================
-// THEME
-// ============================================
 @Composable
 fun OrionTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = OrionPurple,
-            background = DeepSpace,
-            surface = Surface1,
-            onBackground = TextPrimary,
-            onSurface = TextPrimary
+            primary = OrionPurple, background = DeepSpace,
+            surface = Surface1, onBackground = TextPrimary, onSurface = TextPrimary
         ),
         content = content
     )
 }
 
-// ============================================
-// 4-POINT SPARKLE
-// ============================================
 fun DrawScope.drawFourPointSparkle(center: Offset, size: Float, brush: Brush) {
     val path = Path().apply {
         moveTo(center.x, center.y - size)
@@ -178,24 +164,16 @@ fun SparkleStar(modifier: Modifier = Modifier, size: Int = 72) {
     Canvas(modifier = modifier.size(size.dp)) {
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
         val radius = this.size.minDimension / 2f
-        drawFourPointSparkle(
-            center = center,
-            size = radius,
-            brush = Brush.linearGradient(listOf(OrionPurple, OrionPink, OrionOrange))
-        )
+        drawFourPointSparkle(center, radius,
+            Brush.linearGradient(listOf(OrionPurple, OrionPink, OrionOrange)))
     }
 }
 
-// ============================================
-// MAIN
-// ============================================
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            OrionTheme { OrionApp() }
-        }
+        setContent { OrionTheme { OrionApp() } }
     }
 }
 
@@ -222,6 +200,7 @@ fun OrionApp() {
 
     var currentTier by remember { mutableStateOf(Tier.PRIME) }
     var extendedMode by remember { mutableStateOf(false) }
+    var fastMode by remember { mutableStateOf(true) }
     var inputText by remember { mutableStateOf("") }
 
     var statusMessage by remember { mutableStateOf("What should we focus on?") }
@@ -231,18 +210,30 @@ fun OrionApp() {
     var isGenerating by remember { mutableStateOf(false) }
     var loadProgress by remember { mutableStateOf(-1) }
 
-    LaunchedEffect(currentTier, ModelManager.tierAssignments.value) {
+    // Context size scales with mode
+    val nCtx = when {
+        fastMode -> 2048
+        extendedMode -> 8192
+        else -> 4096
+    }
+
+    LaunchedEffect(currentTier, ModelManager.tierAssignments.value, nCtx) {
         val assigned = ModelManager.tierAssignments.value[currentTier]
-        if (assigned == null) {
-            isModelLoading = false
-            return@LaunchedEffect
-        }
+        if (assigned == null) { isModelLoading = false; return@LaunchedEffect }
         val path = ModelManager.getAssignedModelPath(context, currentTier)
         if (path == null) {
             statusMessage = "Assigned model '$assigned' not found"
             isModelLoading = false
             return@LaunchedEffect
         }
+
+        // Skip reload if same model + same ctx already loaded
+        val alreadyLoaded = try { LlamaEngine.isModelLoaded(path, nCtx) } catch (_: Exception) { false }
+        if (alreadyLoaded) {
+            statusMessage = "What should we focus on?"
+            return@LaunchedEffect
+        }
+
         isModelLoading = true
         loadProgress = -1
         statusMessage = "Loading ${currentTier.display}..."
@@ -254,7 +245,7 @@ fun OrionApp() {
             }
         }
 
-        val error = LlamaEngine.loadModelAsync(context, path)
+        val error = LlamaEngine.loadModelAsync(context, path, nCtx)
         isModelLoading = false
         poller.cancel()
         loadProgress = -1
@@ -274,10 +265,7 @@ fun OrionApp() {
                 SidebarContent(
                     sessions = sessions,
                     onClose = { isSidebarOpen = false },
-                    onOpenSettings = {
-                        isSidebarOpen = false
-                        showSettings = true
-                    }
+                    onOpenSettings = { isSidebarOpen = false; showSettings = true }
                 )
             }
         }
@@ -290,6 +278,7 @@ fun OrionApp() {
                     TopBar(
                         currentTier = currentTier,
                         extendedMode = extendedMode,
+                        fastMode = fastMode,
                         isSidebarOpen = isSidebarOpen,
                         onMenuClick = { isSidebarOpen = true },
                         onNewChatClick = {
@@ -304,7 +293,14 @@ fun OrionApp() {
                                 streamingText = ""
                             }
                         },
-                        onExtendedToggle = { extendedMode = !extendedMode }
+                        onExtendedToggle = {
+                            extendedMode = !extendedMode
+                            if (extendedMode) fastMode = false
+                        },
+                        onFastToggle = {
+                            fastMode = !fastMode
+                            if (fastMode) extendedMode = false
+                        }
                     )
                 },
                 bottomBar = {
@@ -314,10 +310,9 @@ fun OrionApp() {
                         onSend = {
                             val prompt = inputText.trim()
                             if (prompt.isEmpty() || isGenerating || isModelLoading) return@InputBar
-
                             val assigned = ModelManager.tierAssignments.value[currentTier]
                             if (assigned == null) {
-                                statusMessage = "No model assigned to ${currentTier.display}. Open Settings → assign a model."
+                                statusMessage = "No model assigned to ${currentTier.display}."
                                 return@InputBar
                             }
 
@@ -331,7 +326,11 @@ fun OrionApp() {
                             isGenerating = true
                             statusMessage = ""
 
-                            val maxTokens = if (extendedMode) 4096 else 2048
+                            val maxTokens = when {
+                                fastMode -> 512
+                                extendedMode -> 4096
+                                else -> 2048
+                            }
                             scope.launch {
                                 val buffer = StringBuilder()
                                 val lock = Any()
@@ -363,24 +362,15 @@ fun OrionApp() {
 
                                     val elapsed = System.currentTimeMillis() - startTime
                                     val tokPerSec = if (elapsed > 0) tokenCount * 1000.0 / elapsed else 0.0
-                                    val cleaned = cleanMarkdown(fullResult.trim())
-                                        .ifEmpty { "(empty response)" }
-
+                                    val cleaned = cleanMarkdown(fullResult.trim()).ifEmpty { "(empty)" }
                                     conversation = conversation + ChatMessage(
-                                        role = "assistant",
-                                        content = cleaned,
-                                        tokenCount = tokenCount,
-                                        tokPerSec = tokPerSec,
-                                        elapsedMs = elapsed
+                                        "assistant", cleaned, tokenCount, tokPerSec, elapsed
                                     )
                                     streamingText = ""
                                 } catch (e: Exception) {
                                     finished = true
                                     flusher.cancel()
-                                    conversation = conversation + ChatMessage(
-                                        "assistant",
-                                        "Error: ${e.message ?: "unknown"}"
-                                    )
+                                    conversation = conversation + ChatMessage("assistant", "Error: ${e.message}")
                                     streamingText = ""
                                 } finally {
                                     isGenerating = false
@@ -390,185 +380,122 @@ fun OrionApp() {
                     )
                 }
             ) { padding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .background(DeepSpace)
-                ) {
-                    ChatArea(
-                        conversation = conversation,
-                        streamingText = streamingText,
-                        isGenerating = isGenerating,
-                        isModelLoading = isModelLoading,
-                        loadProgress = loadProgress,
-                        statusMessage = statusMessage
-                    )
+                Box(modifier = Modifier.fillMaxSize().padding(padding).background(DeepSpace)) {
+                    ChatArea(conversation, streamingText, isGenerating, isModelLoading, loadProgress, statusMessage)
                 }
             }
         }
     }
 }
 
-fun cleanMarkdown(text: String): String {
-    return text
-        .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
-        .replace(Regex("\\*(.+?)\\*"), "$1")
-        .replace(Regex("^#+\\s*", RegexOption.MULTILINE), "")
-        .replace(Regex("^\\s*-\\s+", RegexOption.MULTILINE), "• ")
-}
+fun cleanMarkdown(text: String): String = text
+    .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+    .replace(Regex("\\*(.+?)\\*"), "$1")
+    .replace(Regex("^#+\\s*", RegexOption.MULTILINE), "")
+    .replace(Regex("^\\s*-\\s+", RegexOption.MULTILINE), "• ")
 
-// ============================================
-// TOP BAR
-// ============================================
 @Composable
 fun TopBar(
-    currentTier: Tier,
-    extendedMode: Boolean,
-    isSidebarOpen: Boolean,
-    onMenuClick: () -> Unit,
-    onNewChatClick: () -> Unit,
-    onTierSelected: (Tier) -> Unit,
-    onExtendedToggle: () -> Unit
+    currentTier: Tier, extendedMode: Boolean, fastMode: Boolean, isSidebarOpen: Boolean,
+    onMenuClick: () -> Unit, onNewChatClick: () -> Unit, onTierSelected: (Tier) -> Unit,
+    onExtendedToggle: () -> Unit, onFastToggle: () -> Unit
 ) {
     var dropdownOpen by remember { mutableStateOf(false) }
 
     val hamburgerAlpha by animateFloatAsState(
         targetValue = if (isSidebarOpen) 0f else 1f,
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "hamburgerAlpha"
+        animationSpec = tween(300, easing = FastOutSlowInEasing), label = "ha"
     )
     val hamburgerWidth by animateDpAsState(
         targetValue = if (isSidebarOpen) 0.dp else 48.dp,
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "hamburgerWidth"
+        animationSpec = tween(300, easing = FastOutSlowInEasing), label = "hw"
     )
     val hamburgerScale by animateFloatAsState(
         targetValue = if (isSidebarOpen) 0.8f else 1f,
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "hamburgerScale"
+        animationSpec = tween(300, easing = FastOutSlowInEasing), label = "hs"
     )
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .width(hamburgerWidth)
-                .clipToBounds(),
-            contentAlignment = Alignment.Center
-        ) {
-            IconButton(
-                onClick = onMenuClick,
-                modifier = Modifier
-                    .alpha(hamburgerAlpha)
-                    .scale(hamburgerScale)
-            ) {
+        Box(modifier = Modifier.width(hamburgerWidth).clipToBounds(), contentAlignment = Alignment.Center) {
+            IconButton(onClick = onMenuClick, modifier = Modifier.alpha(hamburgerAlpha).scale(hamburgerScale)) {
                 Canvas(modifier = Modifier.size(24.dp)) {
-                    val strokeWidth = 2.dp.toPx()
-                    val lineGap = 8.dp.toPx()
-                    val centerY = size.height / 2f
-                    val startX = 3.dp.toPx()
-                    val endX = size.width - 3.dp.toPx()
-                    drawLine(
-                        color = TextPrimary,
-                        start = Offset(startX, centerY - lineGap / 2),
-                        end = Offset(endX, centerY - lineGap / 2),
-                        strokeWidth = strokeWidth,
-                        cap = StrokeCap.Round
-                    )
-                    drawLine(
-                        color = TextPrimary,
-                        start = Offset(startX, centerY + lineGap / 2),
-                        end = Offset(endX, centerY + lineGap / 2),
-                        strokeWidth = strokeWidth,
-                        cap = StrokeCap.Round
-                    )
+                    val sw = 2.dp.toPx(); val lg = 8.dp.toPx()
+                    val cy = size.height / 2f
+                    drawLine(TextPrimary, Offset(3.dp.toPx(), cy - lg / 2), Offset(size.width - 3.dp.toPx(), cy - lg / 2), sw, StrokeCap.Round)
+                    drawLine(TextPrimary, Offset(3.dp.toPx(), cy + lg / 2), Offset(size.width - 3.dp.toPx(), cy + lg / 2), sw, StrokeCap.Round)
                 }
             }
         }
 
         Box {
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(SurfaceContainerHigh)
-                    .clickable { dropdownOpen = true }
+                modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                    .background(SurfaceContainerHigh).clickable { dropdownOpen = true }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(OrionGradient)
-                )
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(OrionGradient))
                 Text(
-                    text = if (extendedMode) "${currentTier.display} Extended" else "Orion ${currentTier.display}",
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
+                    text = when {
+                        fastMode -> "Orion ${currentTier.display} ⚡"
+                        extendedMode -> "Orion ${currentTier.display} Ext"
+                        else -> "Orion ${currentTier.display}"
+                    },
+                    color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium
                 )
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    null,
-                    tint = TextMuted,
-                    modifier = Modifier.size(16.dp)
-                )
+                Icon(Icons.Default.KeyboardArrowDown, null, tint = TextMuted, modifier = Modifier.size(16.dp))
             }
 
-            DropdownMenu(
-                expanded = dropdownOpen,
-                onDismissRequest = { dropdownOpen = false },
-                modifier = Modifier.background(SurfaceContainer)
-            ) {
+            DropdownMenu(expanded = dropdownOpen, onDismissRequest = { dropdownOpen = false },
+                modifier = Modifier.background(SurfaceContainer)) {
                 Tier.entries.forEach { tier ->
                     DropdownMenuItem(
                         text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    tier.icon,
-                                    null,
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Icon(tier.icon, null,
                                     tint = if (tier == currentTier) OrionPurple else TextMuted,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                    modifier = Modifier.size(20.dp))
                                 Column {
                                     Text(tier.display, color = TextPrimary, fontSize = 14.sp)
                                     Text(tier.subtitle, color = TextMuted, fontSize = 12.sp)
                                 }
                             }
                         },
-                        onClick = {
-                            onTierSelected(tier)
-                            dropdownOpen = false
-                        }
+                        onClick = { onTierSelected(tier); dropdownOpen = false }
                     )
                 }
                 HorizontalDivider(color = Color(0x1FFFFFFF))
                 DropdownMenuItem(
                     text = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
+                        Row(modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.OpenInFull,
-                                null,
-                                tint = TextMuted,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Default.Speed, null,
+                                tint = if (fastMode) OrionPurple else TextMuted, modifier = Modifier.size(20.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Fast Mode", color = TextPrimary, fontSize = 14.sp)
+                                Text("Short answers • 2K context", color = TextMuted, fontSize = 12.sp)
+                            }
+                            Switch(checked = fastMode, onCheckedChange = null)
+                        }
+                    },
+                    onClick = { onFastToggle() }
+                )
+                DropdownMenuItem(
+                    text = {
+                        Row(modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Default.OpenInFull, null,
+                                tint = if (extendedMode) OrionPurple else TextMuted, modifier = Modifier.size(20.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Extended Mode", color = TextPrimary, fontSize = 14.sp)
-                                Text("Longer context window", color = TextMuted, fontSize = 12.sp)
+                                Text("Long responses • 8K context", color = TextMuted, fontSize = 12.sp)
                             }
                             Switch(checked = extendedMode, onCheckedChange = null)
                         }
@@ -581,134 +508,70 @@ fun TopBar(
         Spacer(Modifier.weight(1f))
 
         IconButton(onClick = onNewChatClick) {
-            Icon(
-                Icons.Outlined.Edit,
-                "New chat",
-                tint = TextPrimary,
-                modifier = Modifier.size(22.dp)
-            )
+            Icon(Icons.Outlined.Edit, "New chat", tint = TextPrimary, modifier = Modifier.size(22.dp))
         }
 
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(OrionPurple, OrionPink))),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.size(40.dp).clip(CircleShape)
+            .background(Brush.linearGradient(listOf(OrionPurple, OrionPink))),
+            contentAlignment = Alignment.Center) {
             Text("T", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         }
     }
 }
 
-// ============================================
-// SIDEBAR
-// ============================================
 @Composable
-fun SidebarContent(
-    sessions: List<ChatSession>,
-    onClose: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Surface1)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp, 20.dp, 20.dp, 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "O.R.I.O.N.",
-                color = TextPrimary,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Light
-            )
+fun SidebarContent(sessions: List<ChatSession>, onClose: () -> Unit, onOpenSettings: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().background(Surface1).statusBarsPadding().navigationBarsPadding()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(20.dp, 20.dp, 20.dp, 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("O.R.I.O.N.", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Light)
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onClose) {
                 Canvas(modifier = Modifier.size(24.dp)) {
-                    val stroke = 2.dp.toPx()
-                    val rectSize = 20.dp.toPx()
-                    val left = (size.width - rectSize) / 2f
-                    val top = (size.height - rectSize) / 2f
+                    val stroke = 2.dp.toPx(); val rs = 20.dp.toPx()
+                    val left = (size.width - rs) / 2f; val top = (size.height - rs) / 2f
                     val corner = 5.dp.toPx()
                     val path = Path().apply {
                         moveTo(left + corner, top)
-                        lineTo(left + rectSize - corner, top)
-                        quadraticBezierTo(left + rectSize, top, left + rectSize, top + corner)
-                        lineTo(left + rectSize, top + rectSize - corner)
-                        quadraticBezierTo(left + rectSize, top + rectSize, left + rectSize - corner, top + rectSize)
-                        lineTo(left + corner, top + rectSize)
-                        quadraticBezierTo(left, top + rectSize, left, top + rectSize - corner)
+                        lineTo(left + rs - corner, top)
+                        quadraticBezierTo(left + rs, top, left + rs, top + corner)
+                        lineTo(left + rs, top + rs - corner)
+                        quadraticBezierTo(left + rs, top + rs, left + rs - corner, top + rs)
+                        lineTo(left + corner, top + rs)
+                        quadraticBezierTo(left, top + rs, left, top + rs - corner)
                         lineTo(left, top + corner)
                         quadraticBezierTo(left, top, left + corner, top)
                         close()
                     }
-                    drawPath(path, color = TextPrimary, style = Stroke(width = stroke))
-                    drawLine(
-                        color = TextPrimary,
-                        start = Offset(left + rectSize * 0.35f, top + 2.dp.toPx()),
-                        end = Offset(left + rectSize * 0.35f, top + rectSize - 2.dp.toPx()),
-                        strokeWidth = stroke,
-                        cap = StrokeCap.Round
-                    )
+                    drawPath(path, TextPrimary, style = Stroke(width = stroke))
+                    drawLine(TextPrimary, Offset(left + rs * 0.35f, top + 2.dp.toPx()),
+                        Offset(left + rs * 0.35f, top + rs - 2.dp.toPx()), stroke, StrokeCap.Round)
                 }
             }
         }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(SurfaceContainerHigh)
-                .clickable { onClose() }
-                .padding(20.dp, 14.dp),
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            .clip(RoundedCornerShape(999.dp)).background(SurfaceContainerHigh)
+            .clickable { onClose() }.padding(20.dp, 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Icon(Icons.Outlined.Edit, null, tint = TextPrimary, modifier = Modifier.size(20.dp))
             Text("New chat", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
-
         Spacer(Modifier.height(20.dp))
-
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            items(sessions) { session ->
-                Text(
-                    session.title,
-                    color = TextPrimary,
-                    fontSize = 15.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable { onClose() }
-                        .padding(20.dp, 11.dp)
-                )
+            items(sessions) { s ->
+                Text(s.title, color = TextPrimary, fontSize = 15.sp,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(999.dp))
+                        .clickable { onClose() }.padding(20.dp, 11.dp))
             }
         }
-
         HorizontalDivider(color = Color(0x14FFFFFF))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp, 14.dp, 20.dp, 14.dp),
+        Row(modifier = Modifier.fillMaxWidth().padding(20.dp, 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(Brush.linearGradient(listOf(OrionPurple, OrionPink))),
-                contentAlignment = Alignment.Center
-            ) {
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(modifier = Modifier.size(38.dp).clip(CircleShape)
+                .background(Brush.linearGradient(listOf(OrionPurple, OrionPink))),
+                contentAlignment = Alignment.Center) {
                 Text("T", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
             Column(modifier = Modifier.weight(1f)) {
@@ -722,52 +585,25 @@ fun SidebarContent(
     }
 }
 
-// ============================================
-// CHAT AREA
-// ============================================
 @Composable
 fun ChatArea(
-    conversation: List<ChatMessage>,
-    streamingText: String,
-    isGenerating: Boolean,
-    isModelLoading: Boolean,
-    loadProgress: Int,
-    statusMessage: String
+    conversation: List<ChatMessage>, streamingText: String, isGenerating: Boolean,
+    isModelLoading: Boolean, loadProgress: Int, statusMessage: String
 ) {
     val isEmpty = conversation.isEmpty() && streamingText.isEmpty() && !isGenerating
-
     if (isEmpty) {
-        WelcomeScreen(
-            statusMessage = statusMessage,
-            isModelLoading = isModelLoading,
-            loadProgress = loadProgress
-        )
+        WelcomeScreen(statusMessage, isModelLoading, loadProgress)
     } else {
         val scrollState = rememberScrollState()
-
-        LaunchedEffect(conversation.size, streamingText.length) {
-            scrollState.scrollTo(scrollState.maxValue)
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            conversation.forEach { msg ->
-                MessageBubble(msg)
-            }
-
+        LaunchedEffect(conversation.size, streamingText.length) { scrollState.scrollTo(scrollState.maxValue) }
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            conversation.forEach { MessageBubble(it) }
             if (isGenerating) {
-                if (streamingText.isNotEmpty()) {
-                    MessageBubble(ChatMessage("assistant", streamingText))
-                } else {
-                    TypingIndicatorBubble()
-                }
+                if (streamingText.isNotEmpty()) MessageBubble(ChatMessage("assistant", streamingText))
+                else TypingIndicatorBubble()
             }
-
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -775,245 +611,112 @@ fun ChatArea(
 
 @Composable
 fun WelcomeScreen(statusMessage: String, isModelLoading: Boolean, loadProgress: Int) {
-    val transition = rememberInfiniteTransition()
-    val scale by transition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            tween(2400, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse
-        )
-    )
-    val glowAlpha by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(
-            tween(2400, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse
-        )
-    )
+    val t = rememberInfiniteTransition()
+    val sc by t.animateFloat(0.9f, 1.08f,
+        infiniteRepeatable(tween(2400, easing = FastOutSlowInEasing), RepeatMode.Reverse))
+    val ga by t.animateFloat(0.35f, 0.6f,
+        infiniteRepeatable(tween(2400, easing = FastOutSlowInEasing), RepeatMode.Reverse))
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
+    Column(modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(160.dp)
-                .scale(scale),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                StarRed.copy(alpha = glowAlpha),
-                                OrionPurple.copy(alpha = glowAlpha * 0.4f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-            SparkleStar(modifier = Modifier, size = 90)
+        verticalArrangement = Arrangement.Center) {
+        Box(modifier = Modifier.size(160.dp).scale(sc), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().clip(CircleShape).background(
+                Brush.radialGradient(listOf(
+                    StarRed.copy(alpha = ga), OrionPurple.copy(alpha = ga * 0.4f), Color.Transparent))))
+            SparkleStar(size = 90)
         }
-
         Spacer(Modifier.height(28.dp))
-
         if (isModelLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.size(48.dp),
-                color = OrionPurple,
-                trackColor = SurfaceContainerHigh,
-                strokeWidth = 3.dp,
-                progress = { if (loadProgress in 0..100) loadProgress / 100f else 0f }
-            )
+                color = OrionPurple, trackColor = SurfaceContainerHigh, strokeWidth = 3.dp,
+                progress = { if (loadProgress in 0..100) loadProgress / 100f else 0f })
             Spacer(Modifier.height(16.dp))
-            Text(
-                if (loadProgress in 0..100) "Loading ${loadProgress}%" else "Loading model...",
-                color = TextMuted,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Light
-            )
+            Text(if (loadProgress in 0..100) "Loading $loadProgress%" else "Loading model...",
+                color = TextMuted, fontSize = 16.sp, fontWeight = FontWeight.Light)
         } else {
-            Text(
-                statusMessage.ifEmpty { "What should we focus on?" },
-                color = TextPrimary,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Light,
-                modifier = Modifier.padding(horizontal = 32.dp)
-            )
+            Text(statusMessage.ifEmpty { "What should we focus on?" },
+                color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Light,
+                modifier = Modifier.padding(horizontal = 32.dp))
         }
     }
 }
 
-// ============================================
-// TYPING INDICATOR
-// ============================================
 @Composable
 fun TypingIndicatorBubble() {
-    val transition = rememberInfiniteTransition()
-
+    val t = rememberInfiniteTransition()
     @Composable
-    fun dotAlpha(delayMs: Int): Float {
-        val a by transition.animateFloat(
-            initialValue = 0.25f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                tween(durationMillis = 600, delayMillis = delayMs, easing = FastOutSlowInEasing),
-                RepeatMode.Reverse
-            )
-        )
+    fun da(delayMs: Int): Float {
+        val a by t.animateFloat(0.25f, 1f,
+            infiniteRepeatable(tween(600, delayMillis = delayMs, easing = FastOutSlowInEasing), RepeatMode.Reverse))
         return a
     }
-
-    val a1 = dotAlpha(0)
-    val a2 = dotAlpha(150)
-    val a3 = dotAlpha(300)
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
-    ) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))
-                .background(SurfaceContainer)
-                .padding(horizontal = 18.dp, vertical = 14.dp),
+    val a1 = da(0); val a2 = da(150); val a3 = da(300)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Row(modifier = Modifier.clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))
+            .background(SurfaceContainer).padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Dot(a1)
-            Dot(a2)
-            Dot(a3)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Dot(a1); Dot(a2); Dot(a3)
         }
     }
 }
 
 @Composable
 private fun Dot(alpha: Float) {
-    Box(
-        modifier = Modifier
-            .size(8.dp)
-            .alpha(alpha)
-            .clip(CircleShape)
-            .background(OrionPurple)
-    )
+    Box(modifier = Modifier.size(8.dp).alpha(alpha).clip(CircleShape).background(OrionPurple))
 }
 
 @Composable
 fun MessageBubble(message: ChatMessage) {
     val isUser = message.role == "user"
-
-    val bubbleBrush = if (isUser)
-        Brush.linearGradient(listOf(OrionPurple, OrionPink))
-    else
-        Brush.linearGradient(listOf(SurfaceContainer, SurfaceContainer))
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-    ) {
-        Column(
-            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
-        ) {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 320.dp)
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 18.dp,
-                            topEnd = 18.dp,
-                            bottomStart = if (isUser) 18.dp else 4.dp,
-                            bottomEnd = if (isUser) 4.dp else 18.dp
-                        )
-                    )
-                    .background(bubbleBrush)
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Text(
-                    message.content,
+    val brush = if (isUser) Brush.linearGradient(listOf(OrionPurple, OrionPink))
+                else Brush.linearGradient(listOf(SurfaceContainer, SurfaceContainer))
+    Row(modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+        Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
+            Box(modifier = Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(
+                topStart = 18.dp, topEnd = 18.dp,
+                bottomStart = if (isUser) 18.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 18.dp))
+                .background(brush).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Text(message.content,
                     color = if (isUser) UserBubbleText else TextPrimary,
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
-                    fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal
-                )
+                    fontSize = 15.sp, lineHeight = 22.sp,
+                    fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal)
             }
-
-            // Speed stats under assistant messages only
             if (!isUser && message.tokenCount > 0) {
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    "${message.tokenCount} tokens • %.1f tok/s • %.1fs".format(
-                        message.tokPerSec,
-                        message.elapsedMs / 1000.0
-                    ),
-                    color = TextMuted,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(horizontal = 6.dp)
-                )
+                Text("${message.tokenCount} tokens • %.1f tok/s • %.1fs".format(
+                    message.tokPerSec, message.elapsedMs / 1000.0),
+                    color = TextMuted, fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 6.dp))
             }
         }
     }
 }
 
-// ============================================
-// INPUT BAR
-// ============================================
 @Composable
 fun InputBar(text: String, onTextChange: (String) -> Unit, onSend: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(999.dp))
-                .background(SurfaceContainer)
-                .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(999.dp))
-                .padding(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = { }) {
-                Icon(Icons.Default.Add, "Add", tint = TextMuted)
-            }
-
-            TextField(
-                value = text,
-                onValueChange = onTextChange,
-                placeholder = null,
+    Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
+        horizontalArrangement = Arrangement.Center) {
+        Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(999.dp))
+            .background(SurfaceContainer).border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(999.dp))
+            .padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { }) { Icon(Icons.Default.Add, "Add", tint = TextMuted) }
+            TextField(value = text, onValueChange = onTextChange, placeholder = null,
                 modifier = Modifier.weight(1f),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary,
-                    cursorColor = OrionPurple,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                )
-            )
-
-            IconButton(onClick = { }) {
-                Icon(Icons.Default.Mic, "Mic", tint = TextMuted)
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(OrionPurple.copy(alpha = 0.15f))
-                    .border(1.dp, OrionPurple.copy(alpha = 0.4f), CircleShape)
-                    .clickable { onSend() },
-                contentAlignment = Alignment.Center
-            ) {
+                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary,
+                    cursorColor = OrionPurple, focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent))
+            IconButton(onClick = { }) { Icon(Icons.Default.Mic, "Mic", tint = TextMuted) }
+            Box(modifier = Modifier.size(44.dp).clip(CircleShape)
+                .background(OrionPurple.copy(alpha = 0.15f))
+                .border(1.dp, OrionPurple.copy(alpha = 0.4f), CircleShape)
+                .clickable { onSend() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.ArrowUpward, "Send", tint = OrionPurple)
             }
         }
@@ -1022,6 +725,4 @@ fun InputBar(text: String, onTextChange: (String) -> Unit, onSend: () -> Unit) {
 
 @Preview
 @Composable
-fun PreviewOrion() {
-    OrionTheme { OrionApp() }
-}
+fun PreviewOrion() { OrionTheme { OrionApp() } }
