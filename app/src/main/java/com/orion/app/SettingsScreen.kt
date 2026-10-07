@@ -294,7 +294,7 @@ fun SettingsScreen(onClose: () -> Unit) {
                             .fillMaxWidth()
                             .clickable {
                                 if (!logExpanded) {
-                                    logContent = LlamaEngine.readLogTail(context, 500)
+                                    logContent = LlamaEngine.readLogTail(500)
                                 }
                                 logExpanded = !logExpanded
                             }
@@ -331,7 +331,7 @@ fun SettingsScreen(onClose: () -> Unit) {
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IconButton(onClick = {
-                                logContent = LlamaEngine.readLogTail(context, 500)
+                                logContent = LlamaEngine.readLogTail(500)
                             }) {
                                 Icon(
                                     Icons.Default.Refresh,
