@@ -1,5 +1,8 @@
 package com.orion.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -25,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
@@ -65,6 +69,7 @@ fun SettingsScreen(onClose: () -> Unit) {
 
     var logExpanded by remember { mutableStateOf(false) }
     var logContent by remember { mutableStateOf("") }
+    var copyFeedback by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -90,166 +95,102 @@ fun SettingsScreen(onClose: () -> Unit) {
             IconButton(onClick = onClose) {
                 Icon(Icons.Default.ArrowBack, "Back", tint = TextPrimary)
             }
-            Text(
-                "Settings",
-                color = TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text("Settings", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Medium)
         }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // ===== TIER ASSIGNMENTS =====
+            // TIER ASSIGNMENTS
             item {
-                Text(
-                    "TIER ASSIGNMENTS",
-                    color = TextMuted,
-                    fontSize = 12.sp,
+                Text("TIER ASSIGNMENTS", color = TextMuted, fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                )
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
             }
-
             items(Tier.entries.toList(), key = { it.name }) { tier ->
                 TierAssignmentRow(
                     tier = tier,
                     assignedModel = assignments[tier],
                     availableModels = models,
-                    onAssign = { modelName ->
-                        ModelManager.assignModel(tier, modelName)
-                    },
-                    onClear = {
-                        ModelManager.clearAssignment(tier)
-                    }
+                    onAssign = { ModelManager.assignModel(tier, it) },
+                    onClear = { ModelManager.clearAssignment(tier) }
                 )
             }
 
-            // ===== IMPORT MODEL =====
+            // IMPORT MODEL
             item {
-                Text(
-                    "IMPORT MODEL",
-                    color = TextMuted,
-                    fontSize = 12.sp,
+                Text("IMPORT MODEL", color = TextMuted, fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-                )
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             }
-
             item {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(SurfaceContainer)
-                        .clickable(enabled = !isImporting) {
-                            picker.launch(arrayOf("*/*"))
-                        }
+                        .clickable(enabled = !isImporting) { picker.launch(arrayOf("*/*")) }
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Download,
-                        null,
-                        tint = OrionPurple,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Default.Download, null, tint = OrionPurple, modifier = Modifier.size(24.dp))
                     Column {
-                        Text(
-                            "Choose .gguf file",
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            "File will be copied to app storage. Delete the original afterward to save space.",
-                            color = TextMuted,
-                            fontSize = 12.sp
-                        )
+                        Text("Choose .gguf file", color = TextPrimary, fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium)
+                        Text("File copied to app storage. Delete original afterward.",
+                            color = TextMuted, fontSize = 12.sp)
                     }
                 }
             }
 
             if (isImporting || statusMessage.isNotEmpty()) {
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(SurfaceContainer)
-                            .padding(20.dp)
-                    ) {
-                        Text(
-                            importingFile.ifEmpty { statusMessage },
-                            color = TextPrimary,
-                            fontSize = 14.sp
-                        )
+                    Column(modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(SurfaceContainer).padding(20.dp)) {
+                        Text(importingFile.ifEmpty { statusMessage },
+                            color = TextPrimary, fontSize = 14.sp)
                         if (isImporting) {
                             Spacer(Modifier.height(12.dp))
                             LinearProgressIndicator(
                                 progress = { importProgress },
                                 modifier = Modifier.fillMaxWidth(),
-                                color = OrionPurple,
-                                trackColor = SurfaceContainerHigh
-                            )
+                                color = OrionPurple, trackColor = SurfaceContainerHigh)
                             Spacer(Modifier.height(8.dp))
-                            Text(
-                                "${(importProgress * 100).toInt()}%",
-                                color = TextMuted,
-                                fontSize = 12.sp
-                            )
+                            Text("${(importProgress * 100).toInt()}%", color = TextMuted, fontSize = 12.sp)
                         }
                     }
                 }
             }
 
-            // ===== INSTALLED MODELS =====
+            // INSTALLED MODELS
             item {
-                Text(
-                    "INSTALLED MODELS (${models.size})",
-                    color = TextMuted,
-                    fontSize = 12.sp,
+                Text("INSTALLED MODELS (${models.size})", color = TextMuted, fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-                )
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             }
-
             if (models.isEmpty()) {
                 item {
-                    Text(
-                        "No models yet. Import a .gguf file above.",
-                        color = TextMuted,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
+                    Text("No models yet. Import a .gguf file above.",
+                        color = TextMuted, fontSize = 14.sp,
+                        modifier = Modifier.padding(vertical = 12.dp))
                 }
             } else {
                 items(models, key = { it }) { modelName ->
                     val file = File(LlamaEngine.getModelsDir(context), modelName)
                     val sizeMb = file.length() / (1024.0 * 1024.0)
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
                             .background(SurfaceContainer)
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                modelName,
-                                color = TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                "%.1f MB".format(sizeMb),
-                                color = TextMuted,
-                                fontSize = 12.sp
-                            )
+                            Text(modelName, color = TextPrimary, fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium)
+                            Text("%.1f MB".format(sizeMb), color = TextMuted, fontSize = 12.sp)
                         }
                         IconButton(onClick = {
                             Tier.entries.forEach { t ->
@@ -260,64 +201,43 @@ fun SettingsScreen(onClose: () -> Unit) {
                             file.delete()
                             ModelManager.refreshAvailableModels(context)
                         }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                "Delete",
-                                tint = TextMuted,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Icon(Icons.Default.Delete, "Delete", tint = TextMuted,
+                                modifier = Modifier.size(20.dp))
                         }
                     }
                 }
             }
 
-            // ===== DIAGNOSTICS =====
+            // DIAGNOSTICS
             item {
-                Text(
-                    "DIAGNOSTICS",
-                    color = TextMuted,
-                    fontSize = 12.sp,
+                Text("DIAGNOSTICS", color = TextMuted, fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-                )
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
             }
-
             item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceContainer)
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceContainer)) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth()
                             .clickable {
-                                if (!logExpanded) {
-                                    logContent = LlamaEngine.readLogTail(500)
-                                }
+                                if (!logExpanded) logContent = LlamaEngine.readLogTail(500)
                                 logExpanded = !logExpanded
                             }
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(
-                            Icons.Default.BugReport,
-                            null,
-                            tint = OrionPurple,
-                            modifier = Modifier.size(22.dp)
-                        )
+                        Icon(Icons.Default.BugReport, null, tint = OrionPurple,
+                            modifier = Modifier.size(22.dp))
                         Column(modifier = Modifier.weight(1f)) {
+                            Text("Native engine log", color = TextPrimary, fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium)
                             Text(
-                                "Native engine log",
-                                color = TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                if (logExpanded) "Tap to collapse" else "Tap to view last 500 lines",
-                                color = TextMuted,
+                                if (copyFeedback) "Copied to clipboard!"
+                                else if (logExpanded) "Tap to collapse"
+                                else "Tap to view last 500 lines",
+                                color = if (copyFeedback) OrionPurple else TextMuted,
                                 fontSize = 12.sp
                             )
                         }
@@ -325,36 +245,36 @@ fun SettingsScreen(onClose: () -> Unit) {
 
                     if (logExpanded) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IconButton(onClick = {
                                 logContent = LlamaEngine.readLogTail(500)
+                                copyFeedback = false
                             }) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    "Refresh",
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Icon(Icons.Default.Refresh, "Refresh", tint = TextMuted,
+                                    modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(onClick = {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                        as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("orion_log", logContent))
+                                copyFeedback = true
+                            }) {
+                                Icon(Icons.Default.ContentCopy, "Copy", tint = TextMuted,
+                                    modifier = Modifier.size(20.dp))
                             }
                             IconButton(onClick = {
                                 LlamaEngine.clearLog(context)
                                 logContent = "(log cleared)"
+                                copyFeedback = false
                             }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    "Clear",
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Icon(Icons.Default.Delete, "Clear", tint = TextMuted,
+                                    modifier = Modifier.size(20.dp))
                             }
                         }
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth()
                                 .heightIn(max = 400.dp)
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .clip(RoundedCornerShape(8.dp))
@@ -364,10 +284,8 @@ fun SettingsScreen(onClose: () -> Unit) {
                         ) {
                             Text(
                                 logContent.ifEmpty { "(empty)" },
-                                color = TextMuted,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                lineHeight = 14.sp
+                                color = TextMuted, fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace, lineHeight = 14.sp
                             )
                         }
                     }
@@ -391,8 +309,7 @@ private fun TierAssignmentRow(
 
     Box {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
+            modifier = Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(SurfaceContainer)
                 .clickable { menuOpen = true }
@@ -400,24 +317,14 @@ private fun TierAssignmentRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                tier.icon,
-                null,
+            Icon(tier.icon, null,
                 tint = if (assignedModel != null) OrionPurple else TextMuted,
-                modifier = Modifier.size(22.dp)
-            )
+                modifier = Modifier.size(22.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    tier.display,
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    assignedModel ?: "Not assigned — tap to choose",
-                    color = TextMuted,
-                    fontSize = 12.sp
-                )
+                Text(tier.display, color = TextPrimary, fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium)
+                Text(assignedModel ?: "Not assigned — tap to choose",
+                    color = TextMuted, fontSize = 12.sp)
             }
         }
 
@@ -435,26 +342,18 @@ private fun TierAssignmentRow(
                 availableModels.forEach { modelName ->
                     DropdownMenuItem(
                         text = {
-                            Text(
-                                modelName,
+                            Text(modelName,
                                 color = if (modelName == assignedModel) OrionPurple else TextPrimary,
-                                fontSize = 13.sp
-                            )
+                                fontSize = 13.sp)
                         },
-                        onClick = {
-                            onAssign(modelName)
-                            menuOpen = false
-                        }
+                        onClick = { onAssign(modelName); menuOpen = false }
                     )
                 }
             }
             if (assignedModel != null) {
                 DropdownMenuItem(
                     text = { Text("Remove assignment", color = OrionPink, fontSize = 13.sp) },
-                    onClick = {
-                        onClear()
-                        menuOpen = false
-                    }
+                    onClick = { onClear(); menuOpen = false }
                 )
             }
         }
