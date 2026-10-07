@@ -25,17 +25,6 @@ class TokenCallback(val block: (String) -> Unit) {
 object LlamaEngine {
     init { System.loadLibrary("orion") }
 
-    // ============================================================
-    // System prompt — shapes model behavior on every conversation.
-    // Kept short so it doesn't eat into the context window.
-    // ============================================================
-    private const val SYSTEM_PROMPT =
-        "You are O.R.I.O.N., a precise and helpful AI assistant. " +
-        "Answer clearly and directly. Use plain language. " +
-        "If you are unsure, say so instead of guessing. " +
-        "If the question is simple, keep the answer short. " +
-        "If it needs reasoning, think step by step."
-
     external fun loadModel(modelPath: String, nCtx: Int): Boolean
     external fun isModelLoaded(modelPath: String, nCtx: Int): Boolean
     external fun generateStreaming(
@@ -89,35 +78,24 @@ object LlamaEngine {
     ): String = withContext(Dispatchers.IO) {
         val prompt = buildPrompt(messages, modelName)
         val callback = TokenCallback { piece -> onToken(piece) }
-        generateStreaming(prompt, maxTokens, temp, 4, callback)
+        generateStreaming(prompt, maxTokens, temp, 3, callback)
     }
 
     /**
-     * Build a prompt for the model using its native chat template.
-     * Prepends a system message so the model knows how to behave.
+     * Build a prompt using the model's native chat template.
+     * No system prompt — user messages only.
+     * No explicit BOS — llama.cpp adds it automatically.
      */
     private fun buildPrompt(messages: List<ChatMessage>, modelName: String): String {
         val lower = modelName.lowercase()
         return when {
-            lower.contains("lfm2") -> buildChatML(messages, includeStartOfText = true)
-            lower.contains("qwen") -> buildChatML(messages, includeStartOfText = false)
-            lower.contains("minicpm") -> buildChatML(messages, includeStartOfText = false)
             lower.contains("zaya") -> buildZaya(messages)
-            else -> buildChatML(messages, includeStartOfText = false)
+            else -> buildChatML(messages)   // lfm2, qwen, minicpm
         }
     }
 
-    // ChatML format used by LFM2, Qwen, MiniCPM
-    private fun buildChatML(messages: List<ChatMessage>, includeStartOfText: Boolean): String {
+    private fun buildChatML(messages: List<ChatMessage>): String {
         val sb = StringBuilder()
-        if (includeStartOfText) sb.append("<|startoftext|>")
-
-        // System prompt first
-        sb.append("<|im_start|>system\n")
-        sb.append(SYSTEM_PROMPT)
-        sb.append("<|im_end|>\n")
-
-        // Then conversation history
         for (msg in messages) {
             sb.append("<|im_start|>").append(msg.role).append("\n")
             sb.append(msg.content).append("<|im_end|>\n")
@@ -128,7 +106,6 @@ object LlamaEngine {
 
     private fun buildZaya(messages: List<ChatMessage>): String {
         val sb = StringBuilder()
-        sb.append("System: ").append(SYSTEM_PROMPT).append("\n\n")
         for (msg in messages) {
             val tag = if (msg.role == "user") "User" else "Assistant"
             sb.append(tag).append(": ").append(msg.content).append("\n")
