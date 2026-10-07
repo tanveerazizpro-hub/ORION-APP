@@ -327,7 +327,6 @@ fun OrionApp() {
                                             streamingText += piece
                                         }
                                     )
-                                    // Commit the assistant reply as a permanent bubble
                                     val cleaned = cleanMarkdown(fullResult.trim())
                                         .ifEmpty { "(empty response)" }
                                     conversation = conversation + ChatMessage("assistant", cleaned)
@@ -715,7 +714,6 @@ fun ChatArea(
     } else {
         val scrollState = rememberScrollState()
 
-        // Auto-scroll to bottom when new content arrives
         LaunchedEffect(conversation.size, streamingText.length) {
             scrollState.animateScrollTo(scrollState.maxValue)
         }
@@ -731,7 +729,6 @@ fun ChatArea(
                 MessageBubble(msg)
             }
 
-            // Live-streaming bubble
             if (isGenerating) {
                 val liveText = streamingText.ifEmpty { "…" }
                 MessageBubble(ChatMessage("assistant", liveText))
@@ -806,6 +803,11 @@ fun WelcomeScreen(statusMessage: String) {
 fun MessageBubble(message: ChatMessage) {
     val isUser = message.role == "user"
 
+    val bubbleBrush = if (isUser)
+        Brush.linearGradient(listOf(OrionPurple, OrionPink))
+    else
+        Brush.linearGradient(listOf(SurfaceContainer, SurfaceContainer))
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
@@ -821,10 +823,7 @@ fun MessageBubble(message: ChatMessage) {
                         bottomEnd = if (isUser) 4.dp else 18.dp
                     )
                 )
-                .background(
-                    if (isUser) Brush.linearGradient(listOf(OrionPurple, OrionPink))
-                    else SurfaceContainer
-                )
+                .background(bubbleBrush)
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Text(
