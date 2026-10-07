@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <sched.h>
 #include <unistd.h>
+#include <mutex>
+#include <ctime>
+#include <cstdio>
 #include <android/log.h>
 #include "llama.h"
 
@@ -15,7 +18,112 @@
 static llama_model*   g_model = nullptr;
 static llama_context* g_ctx   = nullptr;
 
-// Pin current thread + all future children to the fastest CPU cores.
+// ============================================================
+// Logging infrastructure
+// ============================================================
+static std::mutex g_logMutex;
+static std::string g_logPath;
+
+static void writeLogLine(const char* level, const char* text) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    if (g_logPath.empty()) return;
+    FILE* f = fopen(g_logPath.c_str(), "a");
+    if (!f) return;
+    time_t now = time(nullptr);
+    struct tm* t = localtime(&now);
+    char timeBuf[32];
+    strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", t);
+    // Trim trailing newline from text
+    std::string s(text);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    fprintf(f, "[%s] [%s] %s\n", timeBuf, level, s.c_str());
+    fflush(f);
+    fclose(f);
+}
+
+static void llamaLogCallback(ggml_log_level level, const char* text, void* /*user_data*/) {
+    const char* lvl = "INFO";
+    switch (level) {
+        case GGML_LOG_LEVEL_ERROR: lvl = "ERROR"; break;
+        case GGML_LOG_LEVEL_WARN:  lvl = "WARN";  break;
+        case GGML_LOG_LEVEL_DEBUG: lvl = "DEBUG"; break;
+        case GGML_LOG_LEVEL_CONT:  lvl = "CONT";  break;
+        default: break;
+    }
+    writeLogLine(lvl, text);
+}
+
+static long readAvailableMemMb() {
+    std::ifstream f("/proc/meminfo");
+    if (!f.is_open()) return -1;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("MemAvailable:", 0) == 0) {
+            long kb = 0;
+            if (sscanf(line.c_str(), "MemAvailable: %ld kB", &kb) == 1) {
+                return kb / 1024;
+            }
+        }
+    }
+    return -1;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_orion_app_LlamaEngine_setLogFile(JNIEnv* env, jobject, jstring path) {
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    {
+        std::lock_guard<std::mutex> lock(g_logMutex);
+        g_logPath = p;
+        FILE* f = fopen(g_logPath.c_str(), "w");
+        if (f) fclose(f);
+    }
+    env->ReleaseStringUTFChars(path, p);
+
+    llama_log_set(llamaLogCallback, nullptr);
+
+    writeLogLine("INFO", "============================================");
+    writeLogLine("INFO", "O.R.I.O.N. diagnostic log started");
+    writeLogLine("INFO", "============================================");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_orion_app_LlamaEngine_getLogTail(JNIEnv* env, jobject, jint maxLines) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    if (g_logPath.empty()) return env->NewStringUTF("(log not initialized)");
+
+    FILE* f = fopen(g_logPath.c_str(), "r");
+    if (!f) return env->NewStringUTF("(log file not found)");
+
+    std::string content;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) content.append(buf, n);
+    fclose(f);
+
+    std::vector<std::string> lines;
+    size_t start = 0;
+    while (start < content.size()) {
+        size_t end = content.find('\n', start);
+        if (end == std::string::npos) {
+            lines.push_back(content.substr(start));
+            break;
+        }
+        lines.push_back(content.substr(start, end - start));
+        start = end + 1;
+    }
+
+    int begin = std::max(0, (int)lines.size() - maxLines);
+    std::string result;
+    for (int i = begin; i < (int)lines.size(); i++) {
+        result += lines[i];
+        result += "\n";
+    }
+    return env->NewStringUTF(result.c_str());
+}
+
+// ============================================================
+// CPU pinning
+// ============================================================
 static void pinToBigCores() {
     std::vector<std::pair<long, int>> cores;
     for (int i = 0; i < 8; i++) {
@@ -28,7 +136,7 @@ static void pinToBigCores() {
         if (freq > 0) cores.push_back({freq, i});
     }
     if (cores.empty()) {
-        LOGI("pinToBigCores: no cpufreq info, skipping");
+        writeLogLine("INFO", "pinToBigCores: no cpufreq info, skipping");
         return;
     }
     std::sort(cores.begin(), cores.end(),
@@ -45,8 +153,10 @@ static void pinToBigCores() {
         }
     }
     int rc = sched_setaffinity(0, sizeof(set), &set);
-    LOGI("pinToBigCores: pinned to %d cores at %ld kHz, rc=%d",
-         pinnedCount, topFreq, rc);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "pinToBigCores: pinned to %d cores at %ld kHz, rc=%d",
+             pinnedCount, topFreq, rc);
+    writeLogLine("INFO", msg);
 }
 
 static void unpinFromBigCores() {
@@ -57,47 +167,95 @@ static void unpinFromBigCores() {
     sched_setaffinity(0, sizeof(set), &set);
 }
 
+// ============================================================
+// Load model (with verbose diagnostics)
+// ============================================================
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_orion_app_LlamaEngine_loadModel(JNIEnv* env, jobject, jstring modelPath) {
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
-    LOGI("Loading model: %s", path);
+    std::string pathStr(path);
+    env->ReleaseStringUTFChars(modelPath, path);
+
+    char msg[512];
+    writeLogLine("INFO", "============================================");
+    snprintf(msg, sizeof(msg), "loadModel called for: %s", pathStr.c_str());
+    writeLogLine("INFO", msg);
+
+    // Report file size
+    std::ifstream fsize(pathStr, std::ios::binary | std::ios::ate);
+    if (fsize.is_open()) {
+        long sz = (long)fsize.tellg();
+        fsize.close();
+        snprintf(msg, sizeof(msg), "File size: %.1f MB", sz / (1024.0 * 1024.0));
+        writeLogLine("INFO", msg);
+    } else {
+        writeLogLine("ERROR", "Could not open file for size check");
+    }
+
+    long availBefore = readAvailableMemMb();
+    snprintf(msg, sizeof(msg), "Available RAM before load: %ld MB", availBefore);
+    writeLogLine("INFO", msg);
 
     pinToBigCores();
 
+    writeLogLine("INFO", "Calling llama_backend_init...");
     llama_backend_init();
+    writeLogLine("INFO", "llama_backend_init returned");
 
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = 0;
+    snprintf(msg, sizeof(msg), "Model params: n_gpu_layers=%d", model_params.n_gpu_layers);
+    writeLogLine("INFO", msg);
 
-    g_model = llama_model_load_from_file(path, model_params);
-    env->ReleaseStringUTFChars(modelPath, path);
+    writeLogLine("INFO", "Calling llama_model_load_from_file (this may take minutes)...");
+    g_model = llama_model_load_from_file(pathStr.c_str(), model_params);
+    writeLogLine("INFO", "llama_model_load_from_file returned");
 
     if (!g_model) {
-        LOGE("Failed to load model");
+        writeLogLine("ERROR", "Model is NULL - load failed");
         unpinFromBigCores();
         return JNI_FALSE;
     }
+    writeLogLine("INFO", "Model loaded successfully (pointer non-null)");
 
+    long availAfter = readAvailableMemMb();
+    snprintf(msg, sizeof(msg), "Available RAM after model load: %ld MB", availAfter);
+    writeLogLine("INFO", msg);
+
+    writeLogLine("INFO", "Configuring context params...");
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx           = 4096;
     ctx_params.n_threads       = 4;
     ctx_params.n_threads_batch = 4;
+    snprintf(msg, sizeof(msg), "Context params: n_ctx=%u n_threads=%d n_threads_batch=%d",
+             ctx_params.n_ctx, ctx_params.n_threads, ctx_params.n_threads_batch);
+    writeLogLine("INFO", msg);
 
+    writeLogLine("INFO", "Calling llama_init_from_model (allocates KV cache)...");
     g_ctx = llama_init_from_model(g_model, ctx_params);
+    writeLogLine("INFO", "llama_init_from_model returned");
+
     if (!g_ctx) {
-        LOGE("Failed to create context");
+        writeLogLine("ERROR", "Context is NULL - KV cache allocation failed");
         llama_model_free(g_model);
         g_model = nullptr;
         unpinFromBigCores();
         return JNI_FALSE;
     }
+    writeLogLine("INFO", "Context created successfully");
 
-    LOGI("Model loaded OK");
+    long availFinal = readAvailableMemMb();
+    snprintf(msg, sizeof(msg), "Available RAM after context: %ld MB", availFinal);
+    writeLogLine("INFO", msg);
+    writeLogLine("INFO", "===== LOAD COMPLETE =====");
+
     unpinFromBigCores();
     return JNI_TRUE;
 }
 
-// Streaming generate: invokes callback.onToken(String) for each generated token.
+// ============================================================
+// Streaming generate
+// ============================================================
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_orion_app_LlamaEngine_generateStreaming(
         JNIEnv* env, jobject,
@@ -105,15 +263,14 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
         jobject callback) {
 
     if (!g_model || !g_ctx) {
-        LOGE("Model not loaded");
+        writeLogLine("ERROR", "generateStreaming called but model not loaded");
         return env->NewStringUTF("");
     }
 
-    // Resolve the callback method once.
     jclass cbClass = env->GetObjectClass(callback);
     jmethodID onTokenMethod = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)V");
     if (onTokenMethod == nullptr) {
-        LOGE("Failed to find onToken method on callback");
+        writeLogLine("ERROR", "Failed to find onToken method on callback");
         return env->NewStringUTF("");
     }
 
@@ -133,7 +290,7 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
 
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
     if (llama_decode(g_ctx, batch)) {
-        LOGE("Failed to decode prompt");
+        writeLogLine("ERROR", "Failed to decode prompt");
         unpinFromBigCores();
         return env->NewStringUTF("");
     }
@@ -146,7 +303,6 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
     std::string result;
     for (int i = 0; i < maxTokens; i++) {
         llama_token tok = llama_sampler_sample(smpl, g_ctx, -1);
-
         if (llama_vocab_is_eog(vocab, tok)) break;
 
         char buf[256];
@@ -154,8 +310,6 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
         if (n > 0) {
             std::string piece(buf, n);
             result += piece;
-
-            // Stream to Kotlin
             jstring jpiece = env->NewStringUTF(piece.c_str());
             if (jpiece != nullptr) {
                 env->CallVoidMethod(callback, onTokenMethod, jpiece);
@@ -174,7 +328,9 @@ Java_com_orion_app_LlamaEngine_generateStreaming(
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_orion_app_LlamaEngine_freeModel(JNIEnv*, jobject) {
+    writeLogLine("INFO", "freeModel called");
     if (g_ctx)   { llama_free(g_ctx); g_ctx = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
     llama_backend_free();
+    writeLogLine("INFO", "Model freed");
 }
