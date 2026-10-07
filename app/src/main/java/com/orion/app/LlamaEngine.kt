@@ -8,7 +8,10 @@ import java.io.File
 
 data class ChatMessage(
     val role: String,
-    val content: String
+    val content: String,
+    val tokenCount: Int = 0,
+    val tokPerSec: Double = 0.0,
+    val elapsedMs: Long = 0L
 )
 
 @Keep
@@ -72,7 +75,6 @@ object LlamaEngine {
         configureLogging(context)
     }
 
-    /** Returns null on success, error string on failure. */
     suspend fun loadModelAsync(context: Context, path: String): String? = withContext(Dispatchers.IO) {
         val file = File(path)
         if (!file.exists()) return@withContext "Model file not found"
