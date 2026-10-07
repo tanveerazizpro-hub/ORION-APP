@@ -35,10 +35,9 @@ object LlamaEngine {
     external fun freeModel()
     external fun setLogFile(path: String)
     external fun getLogTail(maxLines: Int): String
+    external fun getLoadProgress(): Int
 
     fun getModelsDir(context: Context): File {
-        // Fall back to internal storage if external isn't available.
-        // getExternalFilesDir can return null on some devices.
         val base = context.getExternalFilesDir(null) ?: context.filesDir
         val dir = File(base, "models")
         if (!dir.exists()) dir.mkdirs()
@@ -56,14 +55,9 @@ object LlamaEngine {
         return File(getModelsDir(context), modelName).absolutePath
     }
 
-    /** Redirect llama.cpp logs to a file inside app storage. */
     fun configureLogging(context: Context) {
         val logFile = File(context.filesDir, "orion_log.txt")
-        try {
-            setLogFile(logFile.absolutePath)
-        } catch (e: Exception) {
-            // Native lib not ready — safe to ignore
-        }
+        try { setLogFile(logFile.absolutePath) } catch (_: Exception) {}
     }
 
     fun readLogTail(context: Context, maxLines: Int = 300): String {
@@ -78,9 +72,7 @@ object LlamaEngine {
         configureLogging(context)
     }
 
-    /**
-     * Load a model. Returns null on success, or a human-readable error string on failure.
-     */
+    /** Returns null on success, error string on failure. */
     suspend fun loadModelAsync(context: Context, path: String): String? = withContext(Dispatchers.IO) {
         val file = File(path)
         if (!file.exists()) return@withContext "Model file not found"
