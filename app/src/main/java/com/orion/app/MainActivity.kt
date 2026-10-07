@@ -205,6 +205,7 @@ fun OrionApp() {
     val focusManager = LocalFocusManager.current
 
     LaunchedEffect(Unit) {
+        LlamaEngine.configureLogging(context)
         ModelManager.init(context)
     }
 
@@ -234,15 +235,15 @@ fun OrionApp() {
         }
         val path = ModelManager.getAssignedModelPath(context, currentTier)
         if (path == null) {
-            statusMessage = "Assigned model '${assigned}' not found"
+            statusMessage = "Assigned model '$assigned' not found"
             isModelLoading = false
             return@LaunchedEffect
         }
         isModelLoading = true
         statusMessage = "Loading ${currentTier.display}..."
-        val ok = LlamaEngine.loadModelAsync(path)
+        val error = LlamaEngine.loadModelAsync(context, path)
         isModelLoading = false
-        statusMessage = if (ok) "What should we focus on?" else "Failed to load model"
+        statusMessage = error ?: "What should we focus on?"
     }
 
     val sessions = emptyList<ChatSession>()
@@ -509,6 +510,7 @@ fun TopBar(
                 DropdownMenuItem(
                     text = {
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
@@ -522,9 +524,12 @@ fun TopBar(
                                 Text("Extended Mode", color = TextPrimary, fontSize = 14.sp)
                                 Text("Longer context window", color = TextMuted, fontSize = 12.sp)
                             }
+                            // Display-only switch — the row itself handles the toggle.
+                            // This prevents the double-fire bug where both the row and
+                            // the switch called onExtendedToggle() for a single tap.
                             Switch(
                                 checked = extendedMode,
-                                onCheckedChange = { onExtendedToggle() }
+                                onCheckedChange = null
                             )
                         }
                     },
